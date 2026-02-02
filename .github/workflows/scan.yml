@@ -1,0 +1,86 @@
+name: AI Security Review
+
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.title }}
+  cancel-in-progress: true
+
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+
+      - name: Extract UUID
+        id: uuid
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          UUID=$(echo "$TITLE" | grep -oE '[a-f0-9-]{36}')
+          echo "uuid=$UUID" >> $GITHUB_OUTPUT
+
+
+      - name: Install deps
+        run: npm install
+
+
+      - name: Run Semgrep
+        run: |
+          docker run --rm -v "$PWD:/src" returntocorp/semgrep semgrep --config=scanners/semgrep.yml /src > semgrep.json
+
+
+      - name: Run CodeQL
+        uses: github/codeql-action/analyze@v3
+
+
+      - name: Gemini Scan
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: node scanners/gemini_scan.js
+
+
+      - name: Score Results
+        run: node scanners/score.js
+
+
+      - name: Build Report
+        run: |
+          node scanners/score.js > reports/report.md
+
+
+      - name: Send Result to Sheet API
+        env:
+          API: ${{ secrets.SHEET_API_URL }}
+          TOKEN: ${{ secrets.SHEET_API_TOKEN }}
+          UUID: ${{ steps.uuid.outputs.uuid }}
+        run: |
+          CODE_SCORE=$(cat .score_code)
+          GEMINI_SCORE=$(cat .score_gemini)
+
+
+          curl -X POST "$API" \
+            -H "Content-Type: application/json" \
+            -d "{\
+              \"action\": \"scan_result\",\
+              \"token\": \"$TOKEN\",\
+              \"uuid\": \"$UUID\",\
+              \"code_score\": \"$CODE_SCORE\",\
+              \"gemini_score\": \"$GEMINI_SCORE\",\
+              \"pr_url\": \"${{ github.event.pull_request.html_url }}\",\
+              \"report\": \"$(cat reports/report.md | base64)\"\
+            }"
