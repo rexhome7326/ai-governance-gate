@@ -28,6 +28,13 @@ jobs:
         with:
           node-version: 20
 
+      - name: Extract UUID
+        id: uuid
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          UUID=$(echo "$TITLE" | grep -oE '[a-f0-9-]{36}')
+          echo "uuid=$UUID" >> $GITHUB_OUTPUT
+
       - name: Find ZIPs
         id: zip
         run: |
@@ -174,11 +181,15 @@ jobs:
       # Notify Sheet
       # --------------------
       - name: Update Sheet
+        env:
+          API: ${{ secrets.SHEET_API_URL }}
+          TOKEN: ${{ secrets.SHEET_API_TOKEN }}
+          UUID: ${{ steps.uuid.outputs.uuid }}
         run: |
           BODY="{
-            \"token\": \"$SHEET_API_TOKEN\",
+            \"token\": \"$TOKEN\",
             \"action\": \"update\",
-            \"uuid\": \"${{ github.head_ref }}\",
+            \"uuid\": \"$UUID\",
             \"patch\": {
               \"6\": \"SCANNED\",
               \"8\": \"${SAST}\",
@@ -189,7 +200,7 @@ jobs:
           }"
 
           echo "=== curl 目標 ==="
-          echo "URL: $SHEET_API_URL"
+          echo "URL: $API"
           echo "Method: POST"
           echo ""
           echo "=== Header ==="
@@ -199,6 +210,6 @@ jobs:
           echo "$BODY"
           echo ""
 
-          curl -X POST "$SHEET_API_URL" \
+          curl -X POST "$API" \
             -H "Content-Type: application/json" \
             -d "$BODY"
