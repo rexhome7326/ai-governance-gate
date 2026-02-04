@@ -34,7 +34,7 @@ Return ONLY JSON with this format:
 Review this code:
 ${code}
 `;
-
+console.log(code);
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`,
     {
@@ -51,6 +51,9 @@ ${code}
 
   const data = await res.json();
   console.log(data);
+  console.log(data.candidates?.[0]?.content);
+  console.log(data.candidates?.[0]?.content?.parts?.[0]);
+  console.log(data.candidates?.[0]?.content?.parts?.[0]?.text);
   const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
 
   fs.mkdirSync('reports', { recursive: true });
