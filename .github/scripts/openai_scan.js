@@ -42,7 +42,7 @@ Return ONLY valid JSON in this exact format:
 Review this code:
 ${code}
 `;
-console.log(code);
+
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -59,8 +59,6 @@ console.log(code);
     })
   });
   const data = await res.json();
-  console.log(data);
-  console.log(data.choices?.[0]?.message);
   console.log(data.choices?.[0]?.message?.content);
   const raw = data.choices?.[0]?.message?.content || '{}';
 
