@@ -36,16 +36,16 @@ jobs:
 
       - name: Unzip
         run: |
-          mkdir -p ${SCAN_DIR} reports
+          mkdir -p ${{ env.SCAN_DIR }} reports
           for z in ${{ steps.zip.outputs.zip }}; do
             echo "Unzipping $z"
-            unzip -o "$z" -d ${SCAN_DIR}
+            unzip -o "$z" -d ${{ env.SCAN_DIR }}
           done
 
       - name: Verify Source
         run: |
           echo "Source tree:"
-          find ${SCAN_DIR} -type f | head -n 50
+          find ${{ env.SCAN_DIR }} -type f | head -n 50
 
       # --------------------
       # CodeQL
@@ -54,7 +54,7 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: javascript
-          source-root: ${SCAN_DIR}
+          source-root: ${{ env.SCAN_DIR }}
 
       - name: Run CodeQL
         uses: github/codeql-action/analyze@v4
