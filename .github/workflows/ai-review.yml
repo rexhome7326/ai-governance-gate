@@ -7,6 +7,10 @@ on:
 jobs:
   scan:
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
 
     env:
       SCAN_DIR: src
@@ -57,7 +61,7 @@ jobs:
           output: reports
 
       - name: Copy CodeQL SARIF
-        run: cp reports/codeql-javascript.sarif reports/codeql.sarif
+        run: cp reports/javascript.sarif reports/codeql.sarif
 
       # --------------------
       # Install Semgrep
