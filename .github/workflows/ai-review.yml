@@ -47,51 +47,83 @@ jobs:
           echo "Source tree:"
           find ${{ env.SCAN_DIR }} -type f | head -n 50
 
+      - name: Check source
+        id: check_source
+        run: |
+          if [ -n "$(find ${{ env.SCAN_DIR }} -type f 2>/dev/null | head -1)" ]; then
+            echo "has_files=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_files=false" >> $GITHUB_OUTPUT
+          fi
+
       # --------------------
       # CodeQL
       # --------------------
       - name: Init CodeQL
+        if: steps.check_source.outputs.has_files == 'true'
         uses: github/codeql-action/init@v4
         with:
           languages: javascript
           source-root: ${{ env.SCAN_DIR }}
 
       - name: Run CodeQL
+        if: steps.check_source.outputs.has_files == 'true'
         uses: github/codeql-action/analyze@v4
         with:
           output: reports
 
       - name: Copy CodeQL SARIF
+        if: steps.check_source.outputs.has_files == 'true'
         run: cp reports/javascript.sarif reports/codeql.sarif
+
+      - name: Create empty CodeQL SARIF
+        if: steps.check_source.outputs.has_files != 'true'
+        run: |
+          echo '{"$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif/master/schemata/sarif-schema-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"CodeQL","rules":[]}},"results":[]}]}' > reports/codeql.sarif
 
       # --------------------
       # Install Semgrep
       # --------------------
       - name: Install Semgrep
         run: pip install semgrep
-      
+
       # --------------------
       # Semgrep
       # --------------------
       - name: Run Semgrep
+        if: steps.check_source.outputs.has_files == 'true'
         run: |
           semgrep scan src --config=.github/scripts/semgrep.yml --json > reports/semgrep.json
+
+      - name: Create empty Semgrep JSON
+        if: steps.check_source.outputs.has_files != 'true'
+        run: echo '{"results":[]}' > reports/semgrep.json
 
       # --------------------
       # Gemini AI Scan
       # --------------------
       - name: Gemini Scan
+        if: steps.check_source.outputs.has_files == 'true'
         run: node .github/scripts/gemini_scan.js
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Create empty Gemini JSON
+        if: steps.check_source.outputs.has_files != 'true'
+        run: echo '{"engine":"gemini","summary":"No source to scan","severity":"low","details":[]}' > reports/gemini.json
 
       # --------------------
       # OpenAI Scan (optional)
       # --------------------
       - name: OpenAI Scan
+        if: steps.check_source.outputs.has_files == 'true'
         run: node .github/scripts/openai_scan.js
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Create empty OpenAI JSON
+        if: steps.check_source.outputs.has_files != 'true'
+        run: echo '{"engine":"openai","summary":"No source to scan","severity":"low","details":[]}' > reports/openai.json
 
       # --------------------
       # Score Results
