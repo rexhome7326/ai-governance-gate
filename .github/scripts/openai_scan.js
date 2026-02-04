@@ -58,8 +58,8 @@ ${code}
       temperature: 0.2
     })
   });
-
   const data = await res.json();
+  console.log(data);
   const raw = data.choices?.[0]?.message?.content || '{}';
 
   fs.mkdirSync('reports', { recursive: true });
