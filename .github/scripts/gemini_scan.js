@@ -50,8 +50,9 @@ ${code}
   );
 
   const data = await res.json();
-  console.log(data.candidates?.[0]?.content?.parts?.[0]?.text);
-  const raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+  let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
+  raw = raw.trim().replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim() || '{}';
+  console.log(raw);
 
   fs.mkdirSync('reports', { recursive: true });
   fs.writeFileSync('reports/gemini.json', raw);
