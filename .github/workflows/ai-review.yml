@@ -24,21 +24,24 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install deps
-        run: npm install
-
-      - name: Find ZIP
+      - name: Find ZIPs
         id: zip
         run: |
-          ZIP=$(ls *.zip | head -n 1)
+          ZIP=$(ls scan-targets/*.zip | head -n 10 | tr '\n' ' ')
           echo "zip=$ZIP" >> $GITHUB_OUTPUT
 
       - name: Unzip
         run: |
-          mkdir src
-          for z in scan-targets/*.zip; do
+          mkdir -p ${SCAN_DIR} reports
+          for z in ${{ steps.zip.outputs.zip }}; do
+            echo "Unzipping $z"
             unzip -o "$z" -d ${SCAN_DIR}
           done
+
+      - name: Verify Source
+        run: |
+          echo "Source tree:"
+          find ${SCAN_DIR} -type f | head -n 50
 
       # --------------------
       # CodeQL
@@ -56,15 +59,17 @@ jobs:
           format: sarif
 
       # --------------------
+      # Install Semgrep
+      # --------------------
+      - name: Install Semgrep
+        run: pip install semgrep
+      
+      # --------------------
       # Semgrep
       # --------------------
       - name: Run Semgrep
         run: |
-          mkdir -p reports
-          npx semgrep scan ${SCAN_DIR} \
-            --config=.github/scripts/semgrep.yml \
-            --json \
-            > reports/semgrep.json
+          semgrep scan src --config=.github/scripts/semgrep.yml --json > reports/semgrep.json
 
       # --------------------
       # Gemini AI Scan

@@ -1,6 +1,6 @@
 import fs from 'fs';
-import fetch from 'node-fetch';
 
+const fetch = global.fetch;
 const API_KEY = process.env.GEMINI_API_KEY;
 const SRC_DIR = process.env.SCAN_DIR || 'src';
 
