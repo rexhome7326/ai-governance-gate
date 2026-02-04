@@ -85,6 +85,7 @@ jobs:
       # Install Semgrep
       # --------------------
       - name: Install Semgrep
+        if: steps.check_source.outputs.has_files == 'true'
         run: pip install semgrep
 
       # --------------------
@@ -174,16 +175,29 @@ jobs:
       # --------------------
       - name: Update Sheet
         run: |
+          BODY="{
+            \"token\": \"$SHEET_API_TOKEN\",
+            \"action\": \"update\",
+            \"uuid\": \"${{ github.head_ref }}\",
+            \"patch\": {
+              \"7\": \"CodeQL+Semgrep SCANNED (${SAST}/10)\",
+              \"8\": \"Gemini SCANNED (${GEMINI}/10)\",
+              \"9\": \"${TOTAL}\",
+              \"10\": \"Avg ${AVG} (${VERDICT})\"
+            }
+          }"
+
+          echo "=== curl 目標 ==="
+          echo "URL: $SHEET_API_URL"
+          echo "Method: POST"
+          echo ""
+          echo "=== Header ==="
+          echo "Content-Type: application/json"
+          echo ""
+          echo "=== Body ==="
+          echo "$BODY"
+          echo ""
+
           curl -X POST "$SHEET_API_URL" \
             -H "Content-Type: application/json" \
-            -d "{
-              \"token\": \"$SHEET_API_TOKEN\",
-              \"action\": \"update\",
-              \"uuid\": \"${{ github.head_ref }}\",
-              \"patch\": {
-                \"7\": \"CodeQL+Semgrep SCANNED (${SAST}/10)\",
-                \"8\": \"Gemini SCANNED (${GEMINI}/10)\",
-                \"9\": \"${TOTAL}\",
-                \"10\": \"Avg ${AVG} (${VERDICT})\"
-              }
-            }"
+            -d "$BODY"
