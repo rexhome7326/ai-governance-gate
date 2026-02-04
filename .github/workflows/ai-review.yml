@@ -180,10 +180,11 @@ jobs:
             \"action\": \"update\",
             \"uuid\": \"${{ github.head_ref }}\",
             \"patch\": {
-              \"7\": \"CodeQL+Semgrep SCANNED (${SAST}/10)\",
-              \"8\": \"Gemini SCANNED (${GEMINI}/10)\",
-              \"9\": \"${TOTAL}\",
-              \"10\": \"Avg ${AVG} (${VERDICT})\"
+              \"6\": \"SCANNED\",
+              \"8\": \"${SAST}\",
+              \"9\": \"${GEMINI}\",
+              \"10\": \"${TOTAL}\",
+              \"11\": \"${AVG} (${VERDICT})\"
             }
           }"
 
