@@ -36,10 +36,13 @@ ${code}
 `;
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'x-goog-api-key': API_KEY,
+        'Content-Type': 'application/json' 
+      },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }]
       })
