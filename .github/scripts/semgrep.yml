@@ -1,0 +1,28 @@
+rules:
+  - id: js-eval
+    patterns:
+      - pattern: eval($X)
+    message: "Avoid eval() — possible RCE"
+    severity: ERROR
+    languages: [javascript]
+
+  - id: dom-xss
+    patterns:
+      - pattern: $X.innerHTML = $Y
+    message: "Possible DOM XSS"
+    severity: WARNING
+    languages: [javascript]
+
+  - id: hardcoded-secret
+    patterns:
+      - pattern-regex: "(api_key|secret|token|password)\\s*[:=]\\s*['\"][^'\"]+['\"]"
+    message: "Possible hardcoded secret"
+    severity: ERROR
+    languages: [javascript, html]
+
+  - id: insecure-form
+    patterns:
+      - pattern: "<form"
+    message: "Check CSRF protection"
+    severity: INFO
+    languages: [html]

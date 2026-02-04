@@ -1,0 +1,204 @@
+name: AI Security Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+
+    env:
+      SCAN_DIR: src
+      SHEET_API_URL: ${{ secrets.SHEET_API_URL }}
+      SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Find ZIPs
+        id: zip
+        run: |
+          ZIP=$(ls scan-targets/*.zip | head -n 10 | tr '\n' ' ')
+          echo "zip=$ZIP" >> $GITHUB_OUTPUT
+
+      - name: Unzip
+        run: |
+          mkdir -p ${{ env.SCAN_DIR }} reports
+          for z in ${{ steps.zip.outputs.zip }}; do
+            echo "Unzipping $z"
+            unzip -o "$z" -d ${{ env.SCAN_DIR }}
+          done
+
+      - name: Verify Source
+        run: |
+          echo "Source tree:"
+          find ${{ env.SCAN_DIR }} -type f | head -n 50
+
+      - name: Check source
+        id: check_source
+        run: |
+          if [ -n "$(find ${{ env.SCAN_DIR }} -type f 2>/dev/null | head -1)" ]; then
+            echo "has_files=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_files=false" >> $GITHUB_OUTPUT
+          fi
+
+      # --------------------
+      # CodeQL
+      # --------------------
+      - name: Init CodeQL
+        if: steps.check_source.outputs.has_files == 'true'
+        uses: github/codeql-action/init@v4
+        with:
+          languages: javascript
+          source-root: ${{ env.SCAN_DIR }}
+
+      - name: Run CodeQL
+        if: steps.check_source.outputs.has_files == 'true'
+        uses: github/codeql-action/analyze@v4
+        with:
+          output: reports
+
+      - name: Copy CodeQL SARIF
+        if: steps.check_source.outputs.has_files == 'true'
+        run: cp reports/javascript.sarif reports/codeql.sarif
+
+      - name: Create empty CodeQL SARIF
+        if: steps.check_source.outputs.has_files != 'true'
+        run: |
+          echo '{"$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif/master/schemata/sarif-schema-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"CodeQL","rules":[]}},"results":[]}]}' > reports/codeql.sarif
+
+      # --------------------
+      # Install Semgrep
+      # --------------------
+      - name: Install Semgrep
+        if: steps.check_source.outputs.has_files == 'true'
+        run: pip install semgrep
+
+      # --------------------
+      # Semgrep
+      # --------------------
+      - name: Run Semgrep
+        if: steps.check_source.outputs.has_files == 'true'
+        run: |
+          semgrep scan src --config=.github/scripts/semgrep.yml --json > reports/semgrep.json
+
+      - name: Create empty Semgrep JSON
+        if: steps.check_source.outputs.has_files != 'true'
+        run: echo '{"results":[]}' > reports/semgrep.json
+
+      # --------------------
+      # Gemini AI Scan
+      # --------------------
+      - name: Gemini Scan
+        if: steps.check_source.outputs.has_files == 'true'
+        run: node .github/scripts/gemini_scan.js
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Create empty Gemini JSON
+        if: steps.check_source.outputs.has_files != 'true'
+        run: echo '{"engine":"gemini","summary":"No source to scan","severity":"low","details":[]}' > reports/gemini.json
+
+      # --------------------
+      # OpenAI Scan (optional)
+      # --------------------
+      - name: OpenAI Scan
+        if: steps.check_source.outputs.has_files == 'true'
+        run: node .github/scripts/openai_scan.js
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      - name: Create empty OpenAI JSON
+        if: steps.check_source.outputs.has_files != 'true'
+        run: echo '{"engine":"openai","summary":"No source to scan","severity":"low","details":[]}' > reports/openai.json
+
+      # --------------------
+      # Score Results
+      # --------------------
+      - name: Score Results
+        run: node .github/scripts/score.js
+
+      # --------------------
+      # Export Score to env
+      # --------------------
+      - name: Export Score
+        run: |
+          SAST=$(jq -r .sast reports/score.json)
+          GEMINI=$(jq -r .gemini reports/score.json)
+          OPENAI=$(jq -r .openai reports/score.json)
+          AVG=$(jq -r .avg reports/score.json)
+          VERDICT=$(jq -r .verdict reports/score.json)
+
+          echo "SAST=$SAST" >> $GITHUB_ENV
+          echo "GEMINI=$GEMINI" >> $GITHUB_ENV
+          echo "OPENAI=$OPENAI" >> $GITHUB_ENV
+          echo "AVG=$AVG" >> $GITHUB_ENV
+          echo "VERDICT=$VERDICT" >> $GITHUB_ENV
+
+          if [[ "$VERDICT" == *"PASS"* ]]; then
+            echo "TOTAL=PASS" >> $GITHUB_ENV
+          else
+            echo "TOTAL=FAIL" >> $GITHUB_ENV
+          fi
+
+      # --------------------
+      # Build Report
+      # --------------------
+      - name: Build Report
+        run: node .github/scripts/build_report.js
+
+      # --------------------
+      # Upload Report Artifact
+      # --------------------
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-review-report
+          path: reports/
+
+      # --------------------
+      # Notify Sheet
+      # --------------------
+      - name: Update Sheet
+        run: |
+          BODY="{
+            \"token\": \"$SHEET_API_TOKEN\",
+            \"action\": \"update\",
+            \"uuid\": \"${{ github.head_ref }}\",
+            \"patch\": {
+              \"6\": \"SCANNED\",
+              \"8\": \"${SAST}\",
+              \"9\": \"${GEMINI}\",
+              \"10\": \"${TOTAL}\",
+              \"11\": \"${AVG} (${VERDICT})\"
+            }
+          }"
+
+          echo "=== curl 目標 ==="
+          echo "URL: $SHEET_API_URL"
+          echo "Method: POST"
+          echo ""
+          echo "=== Header ==="
+          echo "Content-Type: application/json"
+          echo ""
+          echo "=== Body ==="
+          echo "$BODY"
+          echo ""
+
+          curl -X POST "$SHEET_API_URL" \
+            -H "Content-Type: application/json" \
+            -d "$BODY"
