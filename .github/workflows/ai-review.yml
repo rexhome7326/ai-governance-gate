@@ -28,6 +28,14 @@ jobs:
         with:
           node-version: 20
 
+      - name: Extract UUID
+        id: uuid
+        run: |
+          TITLE="${{ github.event.pull_request.title }}"
+          UUID=$(echo "$TITLE" | grep -oE '[a-f0-9-]{36}' | head -1 || true)
+          UUID="${UUID:-}"
+          echo "uuid=$UUID" >> $GITHUB_OUTPUT
+
       - name: Find ZIPs
         id: zip
         run: |
@@ -49,35 +57,43 @@ jobs:
 
       - name: Check source
         id: check_source
+        env:
+          UUID: ${{ steps.uuid.outputs.uuid }}
         run: |
+          HAS_FILES=false
           if [ -n "$(find ${{ env.SCAN_DIR }} -type f 2>/dev/null | head -1)" ]; then
-            echo "has_files=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_files=false" >> $GITHUB_OUTPUT
+            HAS_FILES=true
           fi
+          echo "has_files=$HAS_FILES" >> $GITHUB_OUTPUT
+
+          RUN_SCANS=false
+          if [ "$HAS_FILES" = true ] && [ -n "$UUID" ]; then
+            RUN_SCANS=true
+          fi
+          echo "run_scans=$RUN_SCANS" >> $GITHUB_OUTPUT
 
       # --------------------
       # CodeQL
       # --------------------
       - name: Init CodeQL
-        if: steps.check_source.outputs.has_files == 'true'
+        if: steps.check_source.outputs.run_scans == 'true'
         uses: github/codeql-action/init@v4
         with:
           languages: javascript
           source-root: ${{ env.SCAN_DIR }}
 
       - name: Run CodeQL
-        if: steps.check_source.outputs.has_files == 'true'
+        if: steps.check_source.outputs.run_scans == 'true'
         uses: github/codeql-action/analyze@v4
         with:
           output: reports
 
       - name: Copy CodeQL SARIF
-        if: steps.check_source.outputs.has_files == 'true'
+        if: steps.check_source.outputs.run_scans == 'true'
         run: cp reports/javascript.sarif reports/codeql.sarif
 
       - name: Create empty CodeQL SARIF
-        if: steps.check_source.outputs.has_files != 'true'
+        if: steps.check_source.outputs.run_scans != 'true'
         run: |
           echo '{"$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif/master/schemata/sarif-schema-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"CodeQL","rules":[]}},"results":[]}]}' > reports/codeql.sarif
 
@@ -85,45 +101,45 @@ jobs:
       # Install Semgrep
       # --------------------
       - name: Install Semgrep
-        if: steps.check_source.outputs.has_files == 'true'
+        if: steps.check_source.outputs.run_scans == 'true'
         run: pip install semgrep
 
       # --------------------
       # Semgrep
       # --------------------
       - name: Run Semgrep
-        if: steps.check_source.outputs.has_files == 'true'
+        if: steps.check_source.outputs.run_scans == 'true'
         run: |
           semgrep scan src --config=.github/scripts/semgrep.yml --json > reports/semgrep.json
 
       - name: Create empty Semgrep JSON
-        if: steps.check_source.outputs.has_files != 'true'
+        if: steps.check_source.outputs.run_scans != 'true'
         run: echo '{"results":[]}' > reports/semgrep.json
 
       # --------------------
       # Gemini AI Scan
       # --------------------
       - name: Gemini Scan
-        if: steps.check_source.outputs.has_files == 'true'
+        if: steps.check_source.outputs.run_scans == 'true'
         run: node .github/scripts/gemini_scan.js
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Create empty Gemini JSON
-        if: steps.check_source.outputs.has_files != 'true'
+        if: steps.check_source.outputs.run_scans != 'true'
         run: echo '{"engine":"gemini","summary":"No source to scan","severity":"low","details":[]}' > reports/gemini.json
 
       # --------------------
       # OpenAI Scan (optional)
       # --------------------
       - name: OpenAI Scan
-        if: steps.check_source.outputs.has_files == 'true'
+        if: steps.check_source.outputs.run_scans == 'true'
         run: node .github/scripts/openai_scan.js
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Create empty OpenAI JSON
-        if: steps.check_source.outputs.has_files != 'true'
+        if: steps.check_source.outputs.run_scans != 'true'
         run: echo '{"engine":"openai","summary":"No source to scan","severity":"low","details":[]}' > reports/openai.json
 
       # --------------------
@@ -174,11 +190,16 @@ jobs:
       # Notify Sheet
       # --------------------
       - name: Update Sheet
+        if: steps.check_source.outputs.run_scans == 'true'
+        env:
+          API: ${{ secrets.SHEET_API_URL }}
+          TOKEN: ${{ secrets.SHEET_API_TOKEN }}
+          UUID: ${{ steps.uuid.outputs.uuid }}
         run: |
           BODY="{
-            \"token\": \"$SHEET_API_TOKEN\",
+            \"token\": \"$TOKEN\",
             \"action\": \"update\",
-            \"uuid\": \"${{ github.head_ref }}\",
+            \"uuid\": \"$UUID\",
             \"patch\": {
               \"6\": \"SCANNED\",
               \"8\": \"${SAST}\",
@@ -189,7 +210,7 @@ jobs:
           }"
 
           echo "=== curl 目標 ==="
-          echo "URL: $SHEET_API_URL"
+          echo "URL: $API"
           echo "Method: POST"
           echo ""
           echo "=== Header ==="
@@ -199,6 +220,6 @@ jobs:
           echo "$BODY"
           echo ""
 
-          curl -X POST "$SHEET_API_URL" \
+          curl -X POST "$API" \
             -H "Content-Type: application/json" \
             -d "$BODY"
