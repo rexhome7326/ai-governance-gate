@@ -1,0 +1,146 @@
+name: AI Security Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+
+    env:
+      SCAN_DIR: src
+      SHEET_API_URL: ${{ secrets.SHEET_API_URL }}
+      SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install deps
+        run: npm install
+
+      - name: Find ZIP
+        id: zip
+        run: |
+          ZIP=$(ls *.zip | head -n 1)
+          echo "zip=$ZIP" >> $GITHUB_OUTPUT
+
+      - name: Unzip
+        run: |
+          mkdir src
+          for z in scan-targets/*.zip; do
+            unzip -o "$z" -d ${SCAN_DIR}
+          done
+
+      # --------------------
+      # CodeQL
+      # --------------------
+      - name: Init CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Run CodeQL
+        uses: github/codeql-action/analyze@v3
+        with:
+          output: reports
+          working-directory: ${SCAN_DIR}
+          format: sarif
+
+      # --------------------
+      # Semgrep
+      # --------------------
+      - name: Run Semgrep
+        run: |
+          mkdir -p reports
+          npx semgrep scan ${SCAN_DIR} \
+            --config=.github/scripts/semgrep.yml \
+            --json \
+            > reports/semgrep.json
+
+      # --------------------
+      # Gemini AI Scan
+      # --------------------
+      - name: Gemini Scan
+        run: node .github/scripts/gemini_scan.js
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      # --------------------
+      # OpenAI Scan (optional)
+      # --------------------
+      - name: OpenAI Scan
+        run: node .github/scripts/openai_scan.js
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+      # --------------------
+      # Score Results
+      # --------------------
+      - name: Score Results
+        run: node .github/scripts/score.js
+
+      # --------------------
+      # Export Score to env
+      # --------------------
+      - name: Export Score
+        run: |
+          SAST=$(jq -r .sast reports/score.json)
+          GEMINI=$(jq -r .gemini reports/score.json)
+          OPENAI=$(jq -r .openai reports/score.json)
+          AVG=$(jq -r .avg reports/score.json)
+          VERDICT=$(jq -r .verdict reports/score.json)
+
+          echo "SAST=$SAST" >> $GITHUB_ENV
+          echo "GEMINI=$GEMINI" >> $GITHUB_ENV
+          echo "OPENAI=$OPENAI" >> $GITHUB_ENV
+          echo "AVG=$AVG" >> $GITHUB_ENV
+          echo "VERDICT=$VERDICT" >> $GITHUB_ENV
+
+          if [[ "$VERDICT" == *"PASS"* ]]; then
+            echo "TOTAL=PASS" >> $GITHUB_ENV
+          else
+            echo "TOTAL=FAIL" >> $GITHUB_ENV
+          fi
+
+      # --------------------
+      # Build Report
+      # --------------------
+      - name: Build Report
+        run: node .github/scripts/build_report.js
+
+      # --------------------
+      # Upload Report Artifact
+      # --------------------
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-review-report
+          path: reports/
+
+      # --------------------
+      # Notify Sheet
+      # --------------------
+      - name: Update Sheet
+        run: |
+          curl -X POST "$SHEET_API_URL" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"token\": \"$SHEET_API_TOKEN\",
+              \"action\": \"update\",
+              \"uuid\": \"${{ github.head_ref }}\",
+              \"patch\": {
+                \"7\": \"CodeQL+Semgrep SCANNED (${SAST}/10)\",
+                \"8\": \"Gemini SCANNED (${GEMINI}/10)\",
+                \"9\": \"${TOTAL}\",
+                \"10\": \"Avg ${AVG} (${VERDICT})\"
+              }
+            }"

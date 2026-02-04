@@ -1,0 +1,19 @@
+{
+  "name": "ai-governance-gate",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "gemini": "node .github/scripts/gemini_scan.js",
+    "openai": "node .github/scripts/openai_scan.js",
+    "report": "node .github/scripts/build_report.js"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.9.0",
+    "adm-zip": "^0.5.10",
+    "axios": "^1.6.0",
+    "glob": "^10.3.10",
+    "js-yaml": "^4.1.0",
+    "marked": "^9.1.2"
+  }
+}
