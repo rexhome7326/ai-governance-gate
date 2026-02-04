@@ -55,8 +55,9 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           output: reports
-          working-directory: ${SCAN_DIR}
-          format: sarif
+
+      - name: Copy CodeQL SARIF
+        run: cp reports/codeql-javascript.sarif reports/codeql.sarif
 
       # --------------------
       # Install Semgrep
