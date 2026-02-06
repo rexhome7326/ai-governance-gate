@@ -13,6 +13,8 @@ jobs:
       actions: read
 
     env:
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
       SCAN_DIR: src
       SHEET_API_URL: ${{ secrets.SHEET_API_URL }}
       SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
@@ -153,13 +155,15 @@ jobs:
       # --------------------
       - name: Export Score
         run: |
-          SAST=$(jq -r .sast reports/score.json)
+          CODEQL=$(jq -r .codeql reports/score.json)
+          SEMGREP=$(jq -r .semgrep reports/score.json)
           GEMINI=$(jq -r .gemini reports/score.json)
           OPENAI=$(jq -r .openai reports/score.json)
           AVG=$(jq -r .avg reports/score.json)
           VERDICT=$(jq -r .verdict reports/score.json)
 
-          echo "SAST=$SAST" >> $GITHUB_ENV
+          echo "CODEQL=$CODEQL" >> $GITHUB_ENV
+          echo "SEMGREP=$SEMGREP" >> $GITHUB_ENV
           echo "GEMINI=$GEMINI" >> $GITHUB_ENV
           echo "OPENAI=$OPENAI" >> $GITHUB_ENV
           echo "AVG=$AVG" >> $GITHUB_ENV
@@ -202,10 +206,11 @@ jobs:
             \"uuid\": \"$UUID\",
             \"patch\": {
               \"6\": \"SCANNED\",
-              \"8\": \"${SAST}\",
-              \"9\": \"${GEMINI}\",
-              \"10\": \"${TOTAL}\",
-              \"11\": \"${AVG} (${VERDICT})\"
+              \"8\": \"${CODEQL}\",
+              \"9\": \"${SEMGREP}\",
+              \"10\": \"${GEMINI}\",
+              \"11\": \"${TOTAL}\",
+              \"12\": \"${AVG} (${VERDICT})\"
             }
           }"
 

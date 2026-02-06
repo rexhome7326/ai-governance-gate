@@ -1,39 +1,18 @@
 import fs from 'fs';
+import { codeqlScore } from './score/codeqlScore.js';
+import { semgrepScore } from './score/semgrepScore.js';
+import { aiScore } from './score/aiScore.js';
 
-function scoreFile(file) {
-  if (!fs.existsSync(file)) return 5;
-  const text = fs.readFileSync(file, 'utf8').toLowerCase();
+const codeqlResult = codeqlScore('reports/codeql.sarif');
+const semgrepResult = semgrepScore('reports/semgrep.json');
+const geminiResult = aiScore('reports/gemini.json');
+const openaiResult = aiScore('reports/openai.json');
+const codeql = codeqlResult.score;
+const semgrep = semgrepResult.score;
+const gemini = geminiResult.score;
+const openai = openaiResult.score;
 
-  if (text.includes('critical')) return 9;
-  if (text.includes('high')) return 7;
-  if (text.includes('medium')) return 5;
-  if (text.includes('low')) return 2;
-  return 1;
-}
-
-export function scoreSast() {
-  const semgrep = scoreFile('reports/semgrep.json');
-  const codeql = scoreFile('reports/codeql.sarif');
-  return Math.round((semgrep + codeql) / 2);
-}
-
-function scoreAI(file) {
-  if (!fs.existsSync(file)) return 5;
-  const data = JSON.parse(fs.readFileSync(file));
-  const text = JSON.stringify(data).toLowerCase();
-
-  if (text.includes('critical')) return 9;
-  if (text.includes('high')) return 7;
-  if (text.includes('medium')) return 5;
-  if (text.includes('low')) return 2;
-  return 1;
-}
-
-const sast = scoreSast();
-const gemini = scoreAI('reports/gemini.json');
-const openai = scoreAI('reports/openai.json');
-
-const avg = ((sast + gemini + openai) / 3).toFixed(1);
+const avg = ((codeql * 3 + semgrep * 3 + gemini * 2 + openai * 2) / 10).toFixed(1);
 
 let verdict = 'S3 PASS';
 if (avg >= 9) verdict = 'S0 FAIL';
@@ -41,7 +20,8 @@ else if (avg >= 6) verdict = 'S1 FAIL';
 else if (avg >= 3) verdict = 'S2 FAIL';
 
 const result = {
-  sast,
+  codeql,
+  semgrep,
   gemini,
   openai,
   avg,
