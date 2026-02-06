@@ -59,8 +59,8 @@ ${code}
     })
   });
   const data = await res.json();
-  console.log(data);
   const raw = data.choices?.[0]?.message?.content || '{}';
+  console.log(raw);
 
   fs.mkdirSync('reports', { recursive: true });
   fs.writeFileSync('reports/openai.json', raw);
