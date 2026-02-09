@@ -32,10 +32,10 @@ jobs:
 
       - name: Extract UUID
         id: uuid
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          echo "BODY: ${{ github.event.pull_request.body }}"
-          TITLE="${{ github.event.pull_request.title }}"
-          UUID=$(echo "$TITLE" | grep -oE '[a-f0-9-]{36}' | head -1 || true)
+          UUID=$(echo "$PR_BODY" | jq -r '.uuid // empty' 2>/dev/null || true)
           UUID="${UUID:-}"
           echo "uuid=$UUID" >> $GITHUB_OUTPUT
 
@@ -186,6 +186,7 @@ jobs:
       # Upload Report Artifact
       # --------------------
       - name: Upload Report
+        id: upload-report
         uses: actions/upload-artifact@v4
         with:
           name: ai-review-report
@@ -200,6 +201,7 @@ jobs:
           API: ${{ secrets.SHEET_API_URL }}
           TOKEN: ${{ secrets.SHEET_API_TOKEN }}
           UUID: ${{ steps.uuid.outputs.uuid }}
+          ARTIFACT_URL: ${{ steps.upload-report.outputs.artifact-url }}
         run: |
           BODY="{
             \"token\": \"$TOKEN\",
@@ -212,7 +214,8 @@ jobs:
               \"10\": \"${GEMINI}\",
               \"11\": \"${OPENAI}\",
               \"12\": \"${AVG}\",
-              \"13\": \"${VERDICT}\"
+              \"13\": \"${VERDICT}\",
+              \"14\": \"${ARTIFACT_URL}\"
             }
           }"
 
