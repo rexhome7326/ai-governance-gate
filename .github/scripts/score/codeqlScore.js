@@ -75,7 +75,7 @@ export function codeqlScore(file) {
   out.results = allResults;
 
   if (allResults.length === 0) {
-    out.score = 1;
+    out.score = 0;
     return out;
   }
 

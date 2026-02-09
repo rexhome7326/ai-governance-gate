@@ -208,14 +208,14 @@ jobs:
             \"action\": \"update\",
             \"uuid\": \"$UUID\",
             \"patch\": {
-              \"6\": \"SCANNED\",
-              \"8\": \"${CODEQL}\",
-              \"9\": \"${SEMGREP}\",
-              \"10\": \"${GEMINI}\",
-              \"11\": \"${OPENAI}\",
-              \"12\": \"${AVG}\",
-              \"13\": \"${VERDICT}\",
-              \"14\": \"${ARTIFACT_URL}\"
+              \"7\": \"SCANNED\",,
+              \"9\": \"${ARTIFACT_URL}\"
+              \"10\": \"${CODEQL}\",
+              \"11\": \"${SEMGREP}\",
+              \"12\": \"${GEMINI}\",
+              \"13\": \"${OPENAI}\",
+              \"14\": \"${AVG}\",
+              \"15\": \"${VERDICT}\"
             }
           }"
 
