@@ -13,6 +13,8 @@ jobs:
       actions: read
 
     env:
+      LANG: en_US.UTF-8
+      LC_ALL: en_US.UTF-8
       SCAN_DIR: src
       SHEET_API_URL: ${{ secrets.SHEET_API_URL }}
       SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
@@ -30,9 +32,10 @@ jobs:
 
       - name: Extract UUID
         id: uuid
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          TITLE="${{ github.event.pull_request.title }}"
-          UUID=$(echo "$TITLE" | grep -oE '[a-f0-9-]{36}' | head -1 || true)
+          UUID=$(echo "$PR_BODY" | jq -r '.uuid // empty' 2>/dev/null || true)
           UUID="${UUID:-}"
           echo "uuid=$UUID" >> $GITHUB_OUTPUT
 
@@ -153,13 +156,15 @@ jobs:
       # --------------------
       - name: Export Score
         run: |
-          SAST=$(jq -r .sast reports/score.json)
+          CODEQL=$(jq -r .codeql reports/score.json)
+          SEMGREP=$(jq -r .semgrep reports/score.json)
           GEMINI=$(jq -r .gemini reports/score.json)
           OPENAI=$(jq -r .openai reports/score.json)
           AVG=$(jq -r .avg reports/score.json)
           VERDICT=$(jq -r .verdict reports/score.json)
 
-          echo "SAST=$SAST" >> $GITHUB_ENV
+          echo "CODEQL=$CODEQL" >> $GITHUB_ENV
+          echo "SEMGREP=$SEMGREP" >> $GITHUB_ENV
           echo "GEMINI=$GEMINI" >> $GITHUB_ENV
           echo "OPENAI=$OPENAI" >> $GITHUB_ENV
           echo "AVG=$AVG" >> $GITHUB_ENV
@@ -181,6 +186,7 @@ jobs:
       # Upload Report Artifact
       # --------------------
       - name: Upload Report
+        id: upload-report
         uses: actions/upload-artifact@v4
         with:
           name: ai-review-report
@@ -195,17 +201,21 @@ jobs:
           API: ${{ secrets.SHEET_API_URL }}
           TOKEN: ${{ secrets.SHEET_API_TOKEN }}
           UUID: ${{ steps.uuid.outputs.uuid }}
+          ARTIFACT_URL: ${{ steps.upload-report.outputs.artifact-url }}
         run: |
           BODY="{
             \"token\": \"$TOKEN\",
             \"action\": \"update\",
             \"uuid\": \"$UUID\",
             \"patch\": {
-              \"6\": \"SCANNED\",
-              \"8\": \"${SAST}\",
-              \"9\": \"${GEMINI}\",
-              \"10\": \"${TOTAL}\",
-              \"11\": \"${AVG} (${VERDICT})\"
+              \"7\": \"SCANNED\",,
+              \"9\": \"${ARTIFACT_URL}\"
+              \"10\": \"${CODEQL}\",
+              \"11\": \"${SEMGREP}\",
+              \"12\": \"${GEMINI}\",
+              \"13\": \"${OPENAI}\",
+              \"14\": \"${AVG}\",
+              \"15\": \"${VERDICT}\"
             }
           }"
 
