@@ -208,8 +208,8 @@ jobs:
             \"action\": \"update\",
             \"uuid\": \"$UUID\",
             \"patch\": {
-              \"7\": \"SCANNED\",,
-              \"9\": \"${ARTIFACT_URL}\"
+              \"7\": \"SCANNED\",
+              \"9\": \"${ARTIFACT_URL}\",
               \"10\": \"${CODEQL}\",
               \"11\": \"${SEMGREP}\",
               \"12\": \"${GEMINI}\",
