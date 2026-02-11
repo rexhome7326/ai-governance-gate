@@ -203,13 +203,15 @@ jobs:
           UUID: ${{ steps.uuid.outputs.uuid }}
           ARTIFACT_URL: ${{ steps.upload-report.outputs.artifact-url }}
         run: |
+          CURRENT_TIME=$(node -e "console.log(new Date().toISOString())")
           BODY="{
             \"token\": \"$TOKEN\",
             \"action\": \"update\",
             \"uuid\": \"$UUID\",
             \"patch\": {
-              \"7\": \"SCANNED\",,
-              \"9\": \"${ARTIFACT_URL}\"
+              \"2\": \"${CURRENT_TIME}\",
+              \"7\": \"SCANNED\",
+              \"9\": \"${ARTIFACT_URL}\",
               \"10\": \"${CODEQL}\",
               \"11\": \"${SEMGREP}\",
               \"12\": \"${GEMINI}\",
