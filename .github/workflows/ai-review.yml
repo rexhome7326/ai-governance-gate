@@ -352,12 +352,15 @@ jobs:
               }')
           fi
           THREAD_TS=$(echo "$RESPONSE" | jq -r '.ts // empty')
+          CHANNEL_ID=$(echo "$RESPONSE" | jq -r '.channel // empty')
           echo "thread_ts=${THREAD_TS:-}" >> $GITHUB_OUTPUT
+          echo "channel_id=${CHANNEL_ID:-}" >> $GITHUB_OUTPUT
 
       - name: Upload reports to Slack
         env:
           SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
           THREAD_TS: ${{ steps.notify_slack.outputs.thread_ts }}
+          CHANNEL_ID: ${{ steps.notify_slack.outputs.channel_id }}
         run: |
           for FILE in reports/*; do
             [ -f "$FILE" ] || continue
@@ -389,15 +392,8 @@ jobs:
             # 完成上傳並指定 thread
             curl -s -S -f -X POST https://slack.com/api/files.completeUploadExternal \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/json" \
-              -d "{
-                \"files\": [
-                  {
-                    \"id\": \"$FILE_ID\",
-                    \"title\": \"$FILE_NAME\"
-                  }
-                ],
-                \"channel_id\": \"$SLACK_USER_ID\",
-                \"thread_ts\": \"$THREAD_TS\"
-              }"
+              -H "Content-Type: application/x-www-form-urlencoded; charset=utf-8" \
+              --data-urlencode "files=[{\"id\":\"$FILE_ID\",\"title\":\"$FILE_NAME\"}]" \
+              --data-urlencode "channel_id=$CHANNEL_ID" \
+              --data-urlencode "thread_ts=$THREAD_TS"
           done
