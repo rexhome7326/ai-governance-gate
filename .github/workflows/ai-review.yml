@@ -54,7 +54,8 @@ jobs:
           mkdir -p ${{ env.SCAN_DIR }} reports
           for z in $(ls scan-targets/*.zip 2>/dev/null | head -n 10); do
             echo "Unzipping $z"
-            unzip -o "$z" -d ${{ env.SCAN_DIR }}
+            # -O CP950：ZIP 內檔名為 Windows 繁體中文 (Big5)，解壓時轉成 UTF-8，避免亂碼
+            unzip -O CP950 -o "$z" -d ${{ env.SCAN_DIR }} || unzip -o "$z" -d ${{ env.SCAN_DIR }}
           done
 
       - name: Verify source and check
@@ -361,7 +362,7 @@ jobs:
           for FILE in reports/*; do
             echo "Uploading $FILE"
 
-            FILE_SIZE=$(stat -f%z "$FILE")
+            FILE_SIZE=$(wc -c < "$FILE")
             FILE_NAME=$(basename "$FILE")
 
             # 取得 upload URL
