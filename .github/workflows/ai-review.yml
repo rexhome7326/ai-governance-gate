@@ -379,7 +379,7 @@ jobs:
             RESPONSE=$(curl -s -S -X POST https://slack.com/api/files.getUploadURLExternal \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
               -H "Content-Type: application/json" \
-              -d "$BODY"
+              -d "$BODY")
 
             UPLOAD_URL=$(printf '%s' "$RESPONSE" | jq -r '.upload_url // empty')
             FILE_ID=$(printf '%s' "$RESPONSE" | jq -r '.file_id // empty')
