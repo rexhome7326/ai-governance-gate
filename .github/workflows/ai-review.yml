@@ -366,19 +366,13 @@ jobs:
             FILE_SIZE=$(wc -c < "$FILE")
             FILE_NAME=$(basename "$FILE")
 
-            BODY="{
-              \"filename\": \"$FILE_NAME\",
-              \"length\": \"$FILE_SIZE\"
-            }"
-
-            echo "=== Body ==="
-            echo "$BODY"
-            echo ""
+            # 用 jq 組 JSON：length 必須是數字，filename 正確跳脫
+            BODY=$(jq -n --arg filename "$FILE_NAME" --argjson length "$FILE_SIZE" '{filename: $filename, length: $length}')
 
             # 取得 upload URL
             RESPONSE=$(curl -s -S -X POST https://slack.com/api/files.getUploadURLExternal \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/json" \
+              -H "Content-Type: application/json; charset=utf-8" \
               -d "$BODY")
 
             UPLOAD_URL=$(printf '%s' "$RESPONSE" | jq -r '.upload_url // empty')
