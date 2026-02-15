@@ -361,8 +361,8 @@ jobs:
         run: |
           for FILE in reports/*; do
             [ -f "$FILE" ] || continue
-            echo "Uploading $FILE"
 
+            echo "Uploading $FILE"
             FILE_SIZE=$(wc -c < "$FILE")
             FILE_NAME=$(basename "$FILE")
 
