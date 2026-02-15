@@ -360,13 +360,14 @@ jobs:
           THREAD_TS: ${{ steps.notify_slack.outputs.thread_ts }}
         run: |
           for FILE in reports/*; do
+            [ -f "$FILE" ] || continue
             echo "Uploading $FILE"
 
             FILE_SIZE=$(wc -c < "$FILE")
             FILE_NAME=$(basename "$FILE")
 
             # 取得 upload URL
-            RESPONSE=$(curl -s -X POST https://slack.com/api/files.getUploadURLExternal \
+            RESPONSE=$(curl -s -S -X POST https://slack.com/api/files.getUploadURLExternal \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
               -H "Content-Type: application/json" \
               -d "{
@@ -374,16 +375,21 @@ jobs:
                 \"length\": $FILE_SIZE
               }")
 
-            UPLOAD_URL=$(echo $RESPONSE | jq -r '.upload_url')
-            FILE_ID=$(echo $RESPONSE | jq -r '.file_id')
+            UPLOAD_URL=$(printf '%s' "$RESPONSE" | jq -r '.upload_url // empty')
+            FILE_ID=$(printf '%s' "$RESPONSE" | jq -r '.file_id // empty')
+
+            if [ -z "$UPLOAD_URL" ] || [ -z "$FILE_ID" ]; then
+              echo "Error: getUploadURLExternal failed: $RESPONSE"
+              exit 1
+            fi
 
             # 上傳 binary
-            curl -s -X PUT "$UPLOAD_URL" \
+            curl -s -S -f -X PUT "$UPLOAD_URL" \
               -H "Content-Type: application/octet-stream" \
               --data-binary @"$FILE"
 
             # 完成上傳並指定 thread
-            curl -s -X POST https://slack.com/api/files.completeUploadExternal \
+            curl -s -S -f -X POST https://slack.com/api/files.completeUploadExternal \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
               -H "Content-Type: application/json" \
               -d "{
@@ -396,5 +402,4 @@ jobs:
                 \"channel_id\": \"$SLACK_USER_ID\",
                 \"thread_ts\": \"$THREAD_TS\"
               }"
-
           done
