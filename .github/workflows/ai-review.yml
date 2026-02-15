@@ -351,6 +351,7 @@ jobs:
                 ]
               }')
           fi
+          echo "chat.postMessage response: $RESPONSE"
           THREAD_TS=$(echo "$RESPONSE" | jq -r '.ts // empty')
           CHANNEL_ID=$(echo "$RESPONSE" | jq -r '.channel // empty')
           echo "thread_ts=${THREAD_TS:-}" >> $GITHUB_OUTPUT
@@ -388,7 +389,7 @@ jobs:
 
             # 上傳 binary
             echo "UPLOAD_URL=$UPLOAD_URL FILE=$FILE"
-            RESPONSE_PUT=$(curl -s -S -X PUT "$UPLOAD_URL" \
+            RESPONSE_PUT=$(curl -v -s -S -X PUT "$UPLOAD_URL" \
               -H "Content-Type: application/octet-stream" \
               --data-binary @"$FILE")
             echo "PUT response: $RESPONSE_PUT"
