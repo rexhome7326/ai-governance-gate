@@ -366,17 +366,15 @@ jobs:
             FILE_SIZE=$(wc -c < "$FILE")
             FILE_NAME=$(basename "$FILE")
 
-            # 用 jq 組 JSON：length 必須是數字，filename 正確跳脫
-            BODY=$(jq -n --arg filename "$FILE_NAME" --argjson length "$FILE_SIZE" '{filename: $filename, length: $length}')
-
             # 取得 upload URL
             RESPONSE=$(curl -s -S -X POST https://slack.com/api/files.getUploadURLExternal \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/json; charset=utf-8" \
-              -d "$BODY")
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              --data-urlencode "filename=$FILE_NAME" \
+              --data-urlencode "length=$FILE_SIZE")
 
-            UPLOAD_URL=$(printf '%s' "$RESPONSE" | jq -r '.upload_url // empty')
-            FILE_ID=$(printf '%s' "$RESPONSE" | jq -r '.file_id // empty')
+            UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url // empty')
+            FILE_ID=$(echo "$RESPONSE" | jq -r '.file_id // empty')
 
             if [ -z "$UPLOAD_URL" ] || [ -z "$FILE_ID" ]; then
               echo "Error: getUploadURLExternal failed: $RESPONSE"
