@@ -391,10 +391,10 @@ jobs:
             # 上傳 binary
             echo "=== upload binary ==="
             echo "UPLOAD_URL=$UPLOAD_URL FILE=$FILE"
-            RESPONSE_PUT=$(curl -s -f -X PUT "$UPLOAD_URL" \
+            RESPONSE_PUT=$(curl -s -f -X POST "$UPLOAD_URL" \
               -H "Content-Type: application/octet-stream" \
               --data-binary @"$FILE")
-            echo "PUT response: $RESPONSE_PUT"
+            echo "POST response: $RESPONSE_PUT"
 
             # 完成上傳並指定 thread
             echo "=== to thread ==="
@@ -406,18 +406,5 @@ jobs:
               --data-urlencode "channel_id=$CHANNEL_ID" \
               --data-urlencode "thread_ts=$THREAD_TS")
             echo "completeUploadExternal response: $RESPONSE_COMPLETE"
-
-            # 再用 chat.postMessage 把 file attach 到 thread
-            echo "=== re-post file to thread ==="
-            RESPONSE_RE_POST=$(curl -s -X POST https://slack.com/api/chat.postMessage \
-              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/json; charset=utf-8" \
-              -d "{
-                \"channel\": \"$CHANNEL_ID\",
-                \"thread_ts\": \"$THREAD_TS\",
-                \"text\": \"附件：$FILE_NAME\",
-                \"files\": [\"$FILE_ID\"]
-              }")
-            echo "postMessage file response: $RESPONSE_RE_POST"
 
           done
