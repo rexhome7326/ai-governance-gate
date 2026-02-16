@@ -366,21 +366,58 @@ jobs:
           for FILE in reports/*; do
             [ -f "$FILE" ] || continue
 
+            echo "Uploading $FILE"
+            FILE_SIZE=$(wc -c < "$FILE")
             FILE_NAME=$(basename "$FILE")
-            echo "Uploading $FILE_NAME to thread..."
 
-            RESPONSE=$(curl -s -S -F "file=@$FILE" \
-              -F "channels=$CHANNEL_ID" \
-              -F "thread_ts=$THREAD_TS" \
+            # 取得 upload URL
+            echo "=== get upload URL ==="
+            echo "FILE_NAME=$FILE_NAME FILE_SIZE=$FILE_SIZE"
+            RESPONSE=$(curl -s -S -X POST https://slack.com/api/files.getUploadURLExternal \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              https://slack.com/api/files.upload)
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              --data-urlencode "filename=$FILE_NAME" \
+              --data-urlencode "length=$FILE_SIZE")
+            echo "getUploadURLExternal response: $RESPONSE"
 
-            echo "files.upload response: $RESPONSE"
+            UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url // empty')
+            FILE_ID=$(echo "$RESPONSE" | jq -r '.file_id // empty')
 
-            OK=$(echo "$RESPONSE" | jq -r '.ok')
-            if [ "$OK" != "true" ]; then
-              echo "Upload failed!"
+            if [ -z "$UPLOAD_URL" ] || [ -z "$FILE_ID" ]; then
+              echo "Error: getUploadURLExternal failed: $RESPONSE"
               exit 1
             fi
+
+            # 上傳 binary
+            echo "=== upload binary ==="
+            echo "UPLOAD_URL=$UPLOAD_URL FILE=$FILE"
+            RESPONSE_PUT=$(curl -s -f -X PUT "$UPLOAD_URL" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$FILE")
+            echo "PUT response: $RESPONSE_PUT"
+
+            # 完成上傳並指定 thread
+            echo "=== to thread ==="
+            echo "FILE_ID=$FILE_ID FILE_NAME=$FILE_NAME CHANNEL_ID=$CHANNEL_ID THREAD_TS=$THREAD_TS"
+            RESPONSE_COMPLETE=$(curl -s -S -X POST https://slack.com/api/files.completeUploadExternal \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              --data-urlencode "files=[{\"id\":\"$FILE_ID\",\"title\":\"$FILE_NAME\"}]" \
+              --data-urlencode "channel_id=$CHANNEL_ID" \
+              --data-urlencode "thread_ts=$THREAD_TS")
+            echo "completeUploadExternal response: $RESPONSE_COMPLETE"
+
+            # 再用 chat.postMessage 把 file attach 到 thread
+            curl -s -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"channel\": \"$CHANNEL_ID\",
+                \"thread_ts\": \"$THREAD_TS\",
+                \"text\": \"\",
+                \"files\": [
+                  \"$FILE_ID\"
+                ]
+              }"
 
           done
