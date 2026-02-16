@@ -300,7 +300,7 @@ jobs:
           else
             RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/json" \
+              -H "Content-Type: application/json; charset=utf-8" \
               -d '{
                 "channel": "'$SLACK_USER_ID'",
                 "attachments": [
@@ -408,9 +408,10 @@ jobs:
             echo "completeUploadExternal response: $RESPONSE_COMPLETE"
 
             # 再用 chat.postMessage 把 file attach 到 thread
-            curl -s -X POST https://slack.com/api/chat.postMessage \
+            echo "=== re-post file to thread ==="
+            RESPONSE_RE_POST=$(curl -s -X POST https://slack.com/api/chat.postMessage \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/json" \
+              -H "Content-Type: application/json; charset=utf-8" \
               -d "{
                 \"channel\": \"$CHANNEL_ID\",
                 \"thread_ts\": \"$THREAD_TS\",
@@ -418,6 +419,7 @@ jobs:
                 \"files\": [
                   \"$FILE_ID\"
                 ]
-              }"
+              }")
+            echo "postMessage file response: $RESPONSE_RE_POST"
 
           done
