@@ -415,10 +415,8 @@ jobs:
               -d "{
                 \"channel\": \"$CHANNEL_ID\",
                 \"thread_ts\": \"$THREAD_TS\",
-                \"text\": \"\",
-                \"files\": [
-                  \"$FILE_ID\"
-                ]
+                \"text\": \" \",
+                \"files\": [\"$FILE_ID\"]
               }")
             echo "postMessage file response: $RESPONSE_RE_POST"
 
