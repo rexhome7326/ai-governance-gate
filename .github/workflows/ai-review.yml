@@ -416,13 +416,7 @@ jobs:
                 \"channel\": \"$CHANNEL_ID\",
                 \"thread_ts\": \"$THREAD_TS\",
                 \"text\": \"附件：$FILE_NAME\",
-                \"blocks\": [
-                  {
-                    \"type\": \"file\",
-                    \"external_id\": \"$FILE_ID\",
-                    \"source\": \"remote\"
-                  }
-                ]
+                \"files\": [\"$FILE_ID\"]
               }")
             echo "postMessage file response: $RESPONSE_RE_POST"
 
