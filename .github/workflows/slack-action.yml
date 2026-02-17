@@ -1,0 +1,31 @@
+# 由 repository_dispatch 或外部 webhook 觸發，處理 Slack 按鈕點擊等動作
+# 例如：收到 Slack Interactivity 後呼叫 GitHub API 觸發此 workflow，帶入 form_edit_url、uuid 等
+name: Slack Action
+
+on:
+  repository_dispatch:
+    types: [slack_action]
+
+jobs:
+  handle:
+    runs-on: ubuntu-latest
+    env:
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+    steps:
+      - name: Get inputs
+        id: inputs
+        run: |
+          ACTION="${{ github.event.client_payload.action || 'unknown' }}"
+          FORM_EDIT_URL="${{ github.event.client_payload.form_edit_url || '' }}"
+          UUID="${{ github.event.client_payload.uuid || '' }}"
+          RESUBMIT_URL="${FORM_EDIT_URL}&entry.2025086705=${UUID}"
+          echo "action=$ACTION" >> $GITHUB_OUTPUT
+          echo "form_edit_url=$FORM_EDIT_URL" >> $GITHUB_OUTPUT
+          echo "uuid=$UUID" >> $GITHUB_OUTPUT
+          echo "resubmit_url=$RESUBMIT_URL" >> $GITHUB_OUTPUT
+
+      - name: Log (resubmit URL for browser)
+        run: |
+          echo "Action: ${{ steps.inputs.outputs.action }}"
+          echo "Resubmit URL (open in browser): ${{ steps.inputs.outputs.resubmit_url }}"
+          # 若需回傳到 Slack，可在此用 curl chat.postMessage 貼上 resubmit_url 連結

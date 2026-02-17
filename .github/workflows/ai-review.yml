@@ -236,6 +236,8 @@ jobs:
         env:
           SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
           FILE_NAME: ${{ steps.check_source.outputs.file_name }}
+          FORM_EDIT_URL: ${{ steps.pr_body.outputs.form_edit_url }}
+          UUID: ${{ steps.pr_body.outputs.uuid }}
         run: |
           if [[ "$VERDICT" == *"PASS"* ]]; then
             RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
@@ -281,6 +283,7 @@ jobs:
                           {
                             "type": "button",
                             "text": { "type": "plain_text", "text": "重新提交檔案" },
+                            "url": "'"${FORM_EDIT_URL}"'&entry.2025086705='"${UUID}"'",
                             "value": "resubmit",
                             "action_id": "resubmit"
                           },
@@ -334,6 +337,7 @@ jobs:
                           {
                             "type": "button",
                             "text": { "type": "plain_text", "text": "重新提交檔案" },
+                            "url": "'"${FORM_EDIT_URL}"'&entry.2025086705='"${UUID}"'",
                             "value": "resubmit",
                             "action_id": "resubmit"
                           },
