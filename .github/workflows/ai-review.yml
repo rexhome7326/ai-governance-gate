@@ -18,6 +18,7 @@ jobs:
       SCAN_DIR: src
       SHEET_API_URL: ${{ secrets.SHEET_API_URL }}
       SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
@@ -30,8 +31,8 @@ jobs:
         with:
           node-version: 20
 
-      - name: Extract UUID
-        id: uuid
+      - name: Extract PR body
+        id: pr_body
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
@@ -39,40 +40,41 @@ jobs:
           UUID="${UUID:-}"
           echo "uuid=$UUID" >> $GITHUB_OUTPUT
 
-      - name: Find ZIPs
-        id: zip
-        run: |
-          ZIP=$(ls scan-targets/*.zip | head -n 10 | tr '\n' ' ')
-          echo "zip=$ZIP" >> $GITHUB_OUTPUT
+          SLACK_USER_ID=$(echo "$PR_BODY" | jq -r '.slackId // empty' 2>/dev/null || true)
+          SLACK_USER_ID="${SLACK_USER_ID:-}"
+          [[ -n "$SLACK_USER_ID" && "$SLACK_USER_ID" != @* ]] && SLACK_USER_ID="@$SLACK_USER_ID"
+          echo "slack_user_id=$SLACK_USER_ID" >> $GITHUB_OUTPUT
 
-      - name: Unzip
+          FORM_EDIT_URL=$(echo "$PR_BODY" | jq -r '.editUrl // empty' 2>/dev/null || true)
+          FORM_EDIT_URL="${FORM_EDIT_URL:-}"
+          echo "form_edit_url=$FORM_EDIT_URL" >> $GITHUB_OUTPUT
+
+      - name: Find and Unzip
         run: |
           mkdir -p ${{ env.SCAN_DIR }} reports
-          for z in ${{ steps.zip.outputs.zip }}; do
+          for z in $(ls scan-targets/*.zip 2>/dev/null | head -n 10); do
             echo "Unzipping $z"
-            unzip -o "$z" -d ${{ env.SCAN_DIR }}
+            # -O CP950：ZIP 內檔名為 Windows 繁體中文 (Big5)，解壓時轉成 UTF-8，避免亂碼
+            unzip -O CP950 -o "$z" -d ${{ env.SCAN_DIR }} || unzip -o "$z" -d ${{ env.SCAN_DIR }}
           done
 
-      - name: Verify Source
+      - name: Verify source and check
+        id: check_source
+        env:
+          UUID: ${{ steps.pr_body.outputs.uuid }}
         run: |
           echo "Source tree:"
           find ${{ env.SCAN_DIR }} -type f | head -n 50
 
-      - name: Check source
-        id: check_source
-        env:
-          UUID: ${{ steps.uuid.outputs.uuid }}
-        run: |
+          FIRST_FILE=$(find ${{ env.SCAN_DIR }} -type f 2>/dev/null | head -1)
+          FILE_NAME=$(echo "$FIRST_FILE" | xargs basename 2>/dev/null || echo "")
           HAS_FILES=false
-          if [ -n "$(find ${{ env.SCAN_DIR }} -type f 2>/dev/null | head -1)" ]; then
-            HAS_FILES=true
-          fi
-          echo "has_files=$HAS_FILES" >> $GITHUB_OUTPUT
-
+          [ -n "$FIRST_FILE" ] && HAS_FILES=true
           RUN_SCANS=false
-          if [ "$HAS_FILES" = true ] && [ -n "$UUID" ]; then
-            RUN_SCANS=true
-          fi
+          [ "$HAS_FILES" = true ] && [ -n "$UUID" ] && RUN_SCANS=true
+
+          echo "file_name=${FILE_NAME:-}" >> $GITHUB_OUTPUT
+          echo "has_files=$HAS_FILES" >> $GITHUB_OUTPUT
           echo "run_scans=$RUN_SCANS" >> $GITHUB_OUTPUT
 
       # --------------------
@@ -125,8 +127,6 @@ jobs:
       - name: Gemini Scan
         if: steps.check_source.outputs.run_scans == 'true'
         run: node .github/scripts/gemini_scan.js
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
       - name: Create empty Gemini JSON
         if: steps.check_source.outputs.run_scans != 'true'
@@ -138,8 +138,6 @@ jobs:
       - name: OpenAI Scan
         if: steps.check_source.outputs.run_scans == 'true'
         run: node .github/scripts/openai_scan.js
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Create empty OpenAI JSON
         if: steps.check_source.outputs.run_scans != 'true'
@@ -198,14 +196,12 @@ jobs:
       - name: Update Sheet
         if: steps.check_source.outputs.run_scans == 'true'
         env:
-          API: ${{ secrets.SHEET_API_URL }}
-          TOKEN: ${{ secrets.SHEET_API_TOKEN }}
-          UUID: ${{ steps.uuid.outputs.uuid }}
+          UUID: ${{ steps.pr_body.outputs.uuid }}
           ARTIFACT_URL: ${{ steps.upload-report.outputs.artifact-url }}
         run: |
           CURRENT_TIME=$(node -e "console.log(new Date().toISOString())")
           BODY="{
-            \"token\": \"$TOKEN\",
+            \"token\": \"$SHEET_API_TOKEN\",
             \"action\": \"update\",
             \"uuid\": \"$UUID\",
             \"patch\": {
@@ -222,7 +218,7 @@ jobs:
           }"
 
           echo "=== curl 目標 ==="
-          echo "URL: $API"
+          echo "URL: $SHEET_API_URL"
           echo "Method: POST"
           echo ""
           echo "=== Header ==="
@@ -232,6 +228,183 @@ jobs:
           echo "$BODY"
           echo ""
 
-          curl -X POST "$API" \
+          curl -X POST "$SHEET_API_URL" \
             -H "Content-Type: application/json" \
             -d "$BODY"
+      - name: Notify Slack with actions
+        id: notify_slack
+        env:
+          SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
+          FILE_NAME: ${{ steps.check_source.outputs.file_name }}
+        run: |
+          if [[ "$VERDICT" == *"PASS"* ]]; then
+            RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/json; charset=utf-8" \
+              -d '{
+                "channel": "'$SLACK_USER_ID'",
+                "attachments": [
+                  {
+                    "color": "#2EB67D",
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":white_check_mark: 你提交的檔案 => *'"${FILE_NAME}"'* :star-struck: *已通過審核*"
+                        }
+                      },
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": "*AI Review 結果如下*\n\n• 風險: *'"${VERDICT}"'*\n• CodeQL: '"${CODEQL}"'\n• SemGrep: '"${SEMGREP}"'\n• Gemini Scan: '"${GEMINI}"'\n• OpenAI Scan: '"${OPENAI}"'\n• Avg: *'"${AVG}"'*"
+                        }
+                      },
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": "_詳細請參考訊息內的附件_\n\n現在請你選擇操作："
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "text": { "type": "plain_text", "text": "確認上傳檔案" },
+                            "style": "primary",
+                            "value": "confirm_upload",
+                            "action_id": "confirm_upload"
+                          },
+                          {
+                            "type": "button",
+                            "text": { "type": "plain_text", "text": "重新提交檔案" },
+                            "value": "resubmit",
+                            "action_id": "resubmit"
+                          },
+                          {
+                            "type": "button",
+                            "text": { "type": "plain_text", "text": "結束這次 review" },
+                            "style": "danger",
+                            "value": "cancel_review",
+                            "action_id": "cancel_review"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }')
+          else
+            RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/json; charset=utf-8" \
+              -d '{
+                "channel": "'$SLACK_USER_ID'",
+                "attachments": [
+                  {
+                    "color": "#E01E5A",
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":x: 你提交的檔案 => *'"${FILE_NAME}"'* :melting_face: *未通過審核*"
+                        }
+                      },
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": "*AI Review 結果如下*\n\n• 風險: *'"${VERDICT}"'*\n• CodeQL: '"${CODEQL}"'\n• SemGrep: '"${SEMGREP}"'\n• Gemini Scan: '"${GEMINI}"'\n• OpenAI Scan: '"${OPENAI}"'\n• Avg: *'"${AVG}"'*"
+                        }
+                      },
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": "_詳細請參考訊息內的附件_\n\n現在請你選擇操作："
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "text": { "type": "plain_text", "text": "重新提交檔案" },
+                            "value": "resubmit",
+                            "action_id": "resubmit"
+                          },
+                          {
+                            "type": "button",
+                            "text": { "type": "plain_text", "text": "取消這次 review" },
+                            "style": "danger",
+                            "value": "cancel_review",
+                            "action_id": "cancel_review"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }')
+          fi
+          echo "chat.postMessage response: $RESPONSE"
+          THREAD_TS=$(echo "$RESPONSE" | jq -r '.ts // empty')
+          CHANNEL_ID=$(echo "$RESPONSE" | jq -r '.channel // empty')
+          echo "thread_ts=${THREAD_TS:-}" >> $GITHUB_OUTPUT
+          echo "channel_id=${CHANNEL_ID:-}" >> $GITHUB_OUTPUT
+
+      - name: Upload reports to Slack
+        env:
+          SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
+          THREAD_TS: ${{ steps.notify_slack.outputs.thread_ts }}
+          CHANNEL_ID: ${{ steps.notify_slack.outputs.channel_id }}
+        run: |
+          for FILE in reports/*; do
+            [ -f "$FILE" ] || continue
+
+            echo "Uploading $FILE"
+            FILE_SIZE=$(wc -c < "$FILE")
+            FILE_NAME=$(basename "$FILE")
+
+            # 取得 upload URL
+            echo "=== get upload URL ==="
+            echo "FILE_NAME=$FILE_NAME FILE_SIZE=$FILE_SIZE"
+            RESPONSE=$(curl -s -S -X POST https://slack.com/api/files.getUploadURLExternal \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              --data-urlencode "filename=$FILE_NAME" \
+              --data-urlencode "length=$FILE_SIZE")
+            echo "getUploadURLExternal response: $RESPONSE"
+
+            UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url // empty')
+            FILE_ID=$(echo "$RESPONSE" | jq -r '.file_id // empty')
+
+            if [ -z "$UPLOAD_URL" ] || [ -z "$FILE_ID" ]; then
+              echo "Error: getUploadURLExternal failed: $RESPONSE"
+              exit 1
+            fi
+
+            # 上傳 binary
+            echo "=== upload binary ==="
+            echo "UPLOAD_URL=$UPLOAD_URL FILE=$FILE"
+            RESPONSE_PUT=$(curl -s -f -X POST "$UPLOAD_URL" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$FILE")
+            echo "POST response: $RESPONSE_PUT"
+
+            # 完成上傳並指定 thread
+            echo "=== to thread ==="
+            echo "FILE_ID=$FILE_ID FILE_NAME=$FILE_NAME CHANNEL_ID=$CHANNEL_ID THREAD_TS=$THREAD_TS"
+            RESPONSE_COMPLETE=$(curl -s -S -X POST https://slack.com/api/files.completeUploadExternal \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/x-www-form-urlencoded" \
+              --data-urlencode "files=[{\"id\":\"$FILE_ID\",\"title\":\"$FILE_NAME\"}]" \
+              --data-urlencode "channel_id=$CHANNEL_ID" \
+              --data-urlencode "thread_ts=$THREAD_TS")
+            echo "completeUploadExternal response: $RESPONSE_COMPLETE"
+
+          done
