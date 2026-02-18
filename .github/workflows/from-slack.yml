@@ -7,9 +7,9 @@ on:
         required: true
       pr_number:
         required: true
-      slack_user:
+      branch:
         required: true
-      slack_action:
+      action:
         required: true
 
 jobs:
