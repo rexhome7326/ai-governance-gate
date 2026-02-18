@@ -1,31 +1,67 @@
-# 由 repository_dispatch 或外部 webhook 觸發，處理 Slack 按鈕點擊等動作
-# 例如：收到 Slack Interactivity 後呼叫 GitHub API 觸發此 workflow，帶入 form_edit_url、uuid 等
+# 由 workflow_dispatch 觸發，可帶 ref（該 PR 的 branch）與 inputs
+# 每個 PR 獨立觸發時帶 ref=該 PR head ref，run 會出現在該 branch/PR 的 Actions
+#
+# 觸發範例（後端收到 Slack 按鈕後呼叫，ref=該 PR head branch）：
+#   curl -X POST -H "Authorization: token <PAT>" \
+#     -H "Accept: application/vnd.github.v3+json" \
+#     https://api.github.com/repos/<owner>/<repo>/actions/workflows/slack-action.yml/dispatches \
+#     -d '{
+#       "ref": "<PR head branch，例如 feature/xxx>",
+#       "inputs": {
+#         "action": "confirm_upload",
+#         "uuid": "...",
+#         "form_edit_url": "https://...",
+#         "branch": "feature/xxx",
+#         "pr_number": "42"
+#       }
+#     }'
 name: Slack Action
 
 on:
-  repository_dispatch:
-    types: [slack_action]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'action_id (confirm_upload / resubmit / cancel_review)'
+        required: true
+        default: 'unknown'
+      uuid:
+        description: 'UUID from PR body'
+        required: false
+        default: ''
+      form_edit_url:
+        description: 'Form edit URL for resubmit'
+        required: false
+        default: ''
+      branch:
+        description: 'PR head branch (ref)'
+        required: false
+        default: ''
+      pr_number:
+        description: 'PR number'
+        required: false
+        default: ''
 
 jobs:
   handle:
     runs-on: ubuntu-latest
     env:
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
     steps:
       - name: Get inputs
         id: inputs
         run: |
-          ACTION="${{ github.event.client_payload.action || 'unknown' }}"
-          FORM_EDIT_URL="${{ github.event.client_payload.form_edit_url || '' }}"
-          UUID="${{ github.event.client_payload.uuid || '' }}"
-          RESUBMIT_URL="${FORM_EDIT_URL}&entry.2025086705=${UUID}"
+          ACTION="${{ github.event.inputs.action }}"
+          UUID="${{ github.event.inputs.uuid }}"
+          BRANCH="${{ github.event.inputs.branch }}"
+          PR_NUMBER="${{ github.event.inputs.pr_number }}"
           echo "action=$ACTION" >> $GITHUB_OUTPUT
-          echo "form_edit_url=$FORM_EDIT_URL" >> $GITHUB_OUTPUT
           echo "uuid=$UUID" >> $GITHUB_OUTPUT
-          echo "resubmit_url=$RESUBMIT_URL" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
 
-      - name: Log (resubmit URL for browser)
+      - name: Log (inputs and resubmit URL)
         run: |
           echo "Action: ${{ steps.inputs.outputs.action }}"
-          echo "Resubmit URL (open in browser): ${{ steps.inputs.outputs.resubmit_url }}"
-          # 若需回傳到 Slack，可在此用 curl chat.postMessage 貼上 resubmit_url 連結
+          echo "UUID: ${{ steps.inputs.outputs.uuid }}"
+          echo "Branch: ${{ steps.inputs.outputs.branch }}"
+          echo "PR number: ${{ steps.inputs.outputs.pr_number }}"

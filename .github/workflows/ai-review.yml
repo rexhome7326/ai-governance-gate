@@ -238,6 +238,8 @@ jobs:
           FILE_NAME: ${{ steps.check_source.outputs.file_name }}
           FORM_EDIT_URL: ${{ steps.pr_body.outputs.form_edit_url }}
           UUID: ${{ steps.pr_body.outputs.uuid }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [[ "$VERDICT" == *"PASS"* ]]; then
             RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
@@ -277,7 +279,7 @@ jobs:
                             "type": "button",
                             "text": { "type": "plain_text", "text": "確認上傳檔案" },
                             "style": "primary",
-                            "value": "confirm_upload",
+                            "value": "{\"action_id\":\"confirm_upload\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\"}",
                             "action_id": "confirm_upload"
                           },
                           {
@@ -291,7 +293,7 @@ jobs:
                             "type": "button",
                             "text": { "type": "plain_text", "text": "結束這次 review" },
                             "style": "danger",
-                            "value": "cancel_review",
+                            "value": "{\"action_id\":\"cancel_review\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\"}",
                             "action_id": "cancel_review"
                           }
                         ]
@@ -345,7 +347,7 @@ jobs:
                             "type": "button",
                             "text": { "type": "plain_text", "text": "取消這次 review" },
                             "style": "danger",
-                            "value": "cancel_review",
+                            "value": "{\"action_id\":\"cancel_review\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\"}",
                             "action_id": "cancel_review"
                           }
                         ]
