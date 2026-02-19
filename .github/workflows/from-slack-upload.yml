@@ -1,4 +1,4 @@
-name: Slack Action
+name: From Slack Upload
 
 on:
   workflow_dispatch:
@@ -13,7 +13,7 @@ on:
         required: true
 
 jobs:
-  handle:
+  handle-click-upload-button:
     runs-on: ubuntu-latest
     env:
       SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
