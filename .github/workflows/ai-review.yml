@@ -63,10 +63,14 @@ jobs:
         env:
           UUID: ${{ steps.pr_body.outputs.uuid }}
         run: |
-          echo "Source tree:"
-          find ${{ env.SCAN_DIR }} -type f | head -n 50
+          echo "SCAN_DIR=${{ env.SCAN_DIR }}"
+          echo "Contents of SCAN_DIR:"
+          ls -la ${{ env.SCAN_DIR }} || true
+          echo "Source tree (first 50 files):"
+          find ${{ env.SCAN_DIR }} -type f 2>/dev/null | head -n 50 || true
 
           FIRST_FILE=$(find ${{ env.SCAN_DIR }} -type f 2>/dev/null | head -1)
+          echo "FIRST_FILE=[$FIRST_FILE]"
           FILE_NAME=$(echo "$FIRST_FILE" | xargs basename 2>/dev/null || echo "")
           HAS_FILES=false
           [ -n "$FIRST_FILE" ] && HAS_FILES=true
@@ -76,8 +80,6 @@ jobs:
           echo "file_name=${FILE_NAME:-}" >> $GITHUB_OUTPUT
           echo "has_files=$HAS_FILES" >> $GITHUB_OUTPUT
           echo "run_scans=$RUN_SCANS" >> $GITHUB_OUTPUT
-
-          echo "file_name written: [$FILE_NAME]"
 
       # --------------------
       # CodeQL
