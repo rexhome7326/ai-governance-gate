@@ -77,6 +77,8 @@ jobs:
           echo "has_files=$HAS_FILES" >> $GITHUB_OUTPUT
           echo "run_scans=$RUN_SCANS" >> $GITHUB_OUTPUT
 
+          echo "file_name written: [$FILE_NAME]"
+
       # --------------------
       # CodeQL
       # --------------------
@@ -241,6 +243,8 @@ jobs:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          echo "FILE_NAME in notify step: [$FILE_NAME]"
+
           if [[ "$VERDICT" == *"PASS"* ]]; then
             RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
