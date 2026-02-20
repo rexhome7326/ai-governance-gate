@@ -71,13 +71,16 @@ jobs:
 
           FIRST_FILE=$(find ${{ env.SCAN_DIR }} -type f 2>/dev/null | head -1)
           echo "FIRST_FILE=[$FIRST_FILE]"
-          FILE_NAME=$(echo "$FIRST_FILE" | xargs basename 2>/dev/null || echo "")
+          FILE_NAME=$(basename "$FIRST_FILE")
           HAS_FILES=false
           [ -n "$FIRST_FILE" ] && HAS_FILES=true
           RUN_SCANS=false
           [ "$HAS_FILES" = true ] && [ -n "$UUID" ] && RUN_SCANS=true
 
-          echo "file_name=${FILE_NAME:-}" >> $GITHUB_OUTPUT
+          # 用 delimiter 寫入，避免檔名含空格、括號、中文時被截斷
+          echo "file_name<<ENDFILENAME" >> $GITHUB_OUTPUT
+          echo "${FILE_NAME:-}" >> $GITHUB_OUTPUT
+          echo "ENDFILENAME" >> $GITHUB_OUTPUT
           echo "has_files=$HAS_FILES" >> $GITHUB_OUTPUT
           echo "run_scans=$RUN_SCANS" >> $GITHUB_OUTPUT
 
