@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: 20
 
-      - name: Extract PR body
+      - name: Extract PR Body
         id: pr_body
         env:
           PR_BODY: ${{ github.event.pull_request.body }}
@@ -49,7 +49,7 @@ jobs:
           FORM_EDIT_URL="${FORM_EDIT_URL:-}"
           echo "form_edit_url=$FORM_EDIT_URL" >> $GITHUB_OUTPUT
 
-      - name: Find and Unzip
+      - name: Find And Unzip
         run: |
           mkdir -p ${{ env.SCAN_DIR }} reports
           for z in $(ls scan-targets/*.zip 2>/dev/null | head -n 10); do
@@ -58,7 +58,7 @@ jobs:
             unzip -O CP950 -o "$z" -d ${{ env.SCAN_DIR }} || unzip -o "$z" -d ${{ env.SCAN_DIR }}
           done
 
-      - name: Verify source and check
+      - name: Verify Source And Check
         id: check_source
         env:
           UUID: ${{ steps.pr_body.outputs.uuid }}
@@ -238,7 +238,7 @@ jobs:
           curl -X POST "$SHEET_API_URL" \
             -H "Content-Type: application/json" \
             -d "$BODY"
-      - name: Notify Slack with actions
+      - name: Notify Slack With Actions
         id: notify_slack
         env:
           SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
@@ -288,7 +288,7 @@ jobs:
                             "type": "button",
                             "text": { "type": "plain_text", "text": "確認上傳檔案" },
                             "style": "primary",
-                            "value": "{\"action_id\":\"confirm_upload\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\"}",
+                            "value": "{\"action_id\":\"confirm_upload\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\",\"slack_user_id\":\"'"${SLACK_USER_ID}"'\"}",
                             "action_id": "confirm_upload"
                           },
                           {
@@ -302,7 +302,7 @@ jobs:
                             "type": "button",
                             "text": { "type": "plain_text", "text": "結束這次 review" },
                             "style": "danger",
-                            "value": "{\"action_id\":\"cancel_review\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\"}",
+                            "value": "{\"action_id\":\"cancel_review\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\",\"slack_user_id\":\"'"${SLACK_USER_ID}"'\"}",
                             "action_id": "cancel_review"
                           }
                         ]
@@ -356,7 +356,7 @@ jobs:
                             "type": "button",
                             "text": { "type": "plain_text", "text": "取消這次 review" },
                             "style": "danger",
-                            "value": "{\"action_id\":\"cancel_review\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\"}",
+                            "value": "{\"action_id\":\"cancel_review\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\",\"slack_user_id\":\"'"${SLACK_USER_ID}"'\"}",
                             "action_id": "cancel_review"
                           }
                         ]
@@ -372,7 +372,7 @@ jobs:
           echo "thread_ts=${THREAD_TS:-}" >> $GITHUB_OUTPUT
           echo "channel_id=${CHANNEL_ID:-}" >> $GITHUB_OUTPUT
 
-      - name: Upload reports to Slack
+      - name: Upload Reports To Slack
         env:
           SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
           THREAD_TS: ${{ steps.notify_slack.outputs.thread_ts }}

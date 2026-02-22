@@ -11,12 +11,19 @@ on:
         required: true
       action:
         required: true
+      slack_user_id:
+        required: true
 
 jobs:
   handle-click-upload-button:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     env:
+      SHEET_API_URL: ${{ secrets.SHEET_API_URL }}
       SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
     steps:
       - name: Get inputs
         id: inputs
@@ -25,14 +32,98 @@ jobs:
           UUID="${{ github.event.inputs.uuid }}"
           BRANCH="${{ github.event.inputs.branch }}"
           PR_NUMBER="${{ github.event.inputs.pr_number }}"
+          SLACK_USER_ID="${{ github.event.inputs.slack_user_id }}"
           echo "action=$ACTION" >> $GITHUB_OUTPUT
           echo "uuid=$UUID" >> $GITHUB_OUTPUT
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "slack_user_id=$SLACK_USER_ID" >> $GITHUB_OUTPUT
 
-      - name: Log (inputs and resubmit URL)
+      - name: Log inputs
+        env:
+          UUID: ${{ steps.inputs.outputs.uuid }}
+          PR_NUMBER: ${{ steps.inputs.outputs.pr_number }}
+          BRANCH: ${{ steps.inputs.outputs.branch }}
+          SLACK_USER_ID: ${{ steps.inputs.outputs.slack_user_id }}
         run: |
           echo "Action: ${{ steps.inputs.outputs.action }}"
-          echo "UUID: ${{ steps.inputs.outputs.uuid }}"
-          echo "Branch: ${{ steps.inputs.outputs.branch }}"
-          echo "PR number: ${{ steps.inputs.outputs.pr_number }}"
+          echo "UUID: $UUID"
+          echo "BRANCH: $BRANCH"
+          echo "PR number: $PR_NUMBER"
+          echo "SLACK_USER_ID: $SLACK_USER_ID"
+
+      - name: Upload File To S3
+        id: upload
+        run: |
+          UPLOADED_URL="https://s.yimg.com/br/yahoo-tw-media/game-center/staging/home/index.html"
+          echo "url=$UPLOADED_URL" >> $GITHUB_OUTPUT
+
+      - name: Update Sheet (USER_UPLOADED)
+        if: steps.upload.outputs.url != ''
+        env:
+          UUID: ${{ steps.inputs.outputs.uuid }}
+          UPLOAD_URL: ${{ steps.upload.outputs.url }}
+        run: |
+          CURRENT_TIME=$(node -e "console.log(new Date().toISOString())")
+          BODY="{
+            \"token\": \"$SHEET_API_TOKEN\",
+            \"action\": \"update\",
+            \"uuid\": \"$UUID\",
+            \"patch\": {
+              \"2\": \"${CURRENT_TIME}\",
+              \"7\": \"USER_UPLOADED\",
+              \"16\": \"$UPLOAD_URL\"
+            }
+          }"
+          curl -s -X POST "$SHEET_API_URL" \
+            -H "Content-Type: application/json" \
+            -d "$BODY"
+
+      - name: Close PR
+        id: close_pr
+        env:
+          UPLOAD_URL: ${{ steps.upload.outputs.url }}
+          PR_NUMBER: ${{ steps.inputs.outputs.pr_number }}
+        continue-on-error: true
+        run: |
+          if [ -z "$UPLOAD_URL" ]; then
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/pr_response.json -X PATCH \
+            -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER \
+            -d '{"state":"closed"}')
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Notify Slack Upload Success
+        if: steps.close_pr.outputs.success == 'true'
+        env:
+          SLACK_USER_ID: ${{ steps.inputs.outputs.slack_user_id }}
+          UPLOAD_URL: ${{ steps.upload.outputs.url }}
+        run: |
+          curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{
+              \"channel\": \"$SLACK_USER_ID\",
+              \"text\": \":white_check_mark: 已上傳檔案\n<$UPLOAD_URL|開啟連結>\"
+            }"
+
+      - name: Notify Slack Upload Failed
+        if: steps.close_pr.outputs.success != 'true'
+        env:
+          SLACK_USER_ID: ${{ steps.inputs.outputs.slack_user_id }}
+        run: |
+          curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{
+              \"channel\": \"$SLACK_USER_ID\",
+              \"text\": \":x: 上傳失敗，請再重新按一次\"
+            }"
