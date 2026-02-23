@@ -1,5 +1,7 @@
 name: From Slack Upload
 
+run-name: "[AI-REVIEW][Slack Action] Upload - ${{ github.event.inputs.uuid }}"
+
 on:
   workflow_dispatch:
     inputs:
@@ -54,14 +56,30 @@ jobs:
           echo "PR number: $PR_NUMBER"
           echo "SLACK_USER_ID: $SLACK_USER_ID"
 
+      - name: Check PR state
+        id: check_pr
+        env:
+          PR_NUMBER: ${{ steps.inputs.outputs.pr_number }}
+        run: |
+          STATE=$(curl -s -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER" | jq -r '.state // "unknown"')
+          echo "state=$STATE" >> $GITHUB_OUTPUT
+          if [ "$STATE" = "closed" ]; then
+            echo "alreadyClosed=true" >> $GITHUB_OUTPUT
+          else
+            echo "alreadyClosed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Upload File To S3
+        if: steps.check_pr.outputs.alreadyClosed != 'true'
         id: upload
         run: |
           UPLOADED_URL="https://s.yimg.com/br/yahoo-tw-media/game-center/staging/home/index.html"
           echo "url=$UPLOADED_URL" >> $GITHUB_OUTPUT
 
       - name: Update Sheet (USER_UPLOADED)
-        if: steps.upload.outputs.url != ''
+        if: steps.check_pr.outputs.alreadyClosed != 'true' && steps.upload.outputs.url != ''
         env:
           UUID: ${{ steps.inputs.outputs.uuid }}
           UPLOAD_URL: ${{ steps.upload.outputs.url }}
@@ -82,6 +100,7 @@ jobs:
             -d "$BODY"
 
       - name: Close PR
+        if: steps.check_pr.outputs.alreadyClosed != 'true'
         id: close_pr
         env:
           UPLOAD_URL: ${{ steps.upload.outputs.url }}
@@ -104,7 +123,7 @@ jobs:
           fi
 
       - name: Notify Slack Upload Success
-        if: steps.close_pr.outputs.success == 'true'
+        if: steps.check_pr.outputs.alreadyClosed != 'true' && steps.close_pr.outputs.success == 'true'
         env:
           SLACK_USER_ID: ${{ steps.inputs.outputs.slack_user_id }}
           UPLOAD_URL: ${{ steps.upload.outputs.url }}
@@ -118,7 +137,7 @@ jobs:
             }"
 
       - name: Notify Slack Upload Failed
-        if: steps.close_pr.outputs.success != 'true'
+        if: steps.check_pr.outputs.alreadyClosed != 'true' && steps.close_pr.outputs.success != 'true'
         env:
           SLACK_USER_ID: ${{ steps.inputs.outputs.slack_user_id }}
         run: |

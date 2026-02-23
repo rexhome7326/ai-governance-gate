@@ -1,5 +1,7 @@
 name: From Slack Cancel
 
+run-name: "[AI-REVIEW][Slack Action] Cancel - ${{ github.event.inputs.uuid }}"
+
 on:
   workflow_dispatch:
     inputs:
@@ -54,7 +56,23 @@ jobs:
           echo "PR number: $PR_NUMBER"
           echo "SLACK_USER_ID: $SLACK_USER_ID"
 
+      - name: Check PR state
+        id: check_pr
+        env:
+          PR_NUMBER: ${{ steps.inputs.outputs.pr_number }}
+        run: |
+          STATE=$(curl -s -H "Authorization: token ${{ github.token }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER" | jq -r '.state // "unknown"')
+          echo "state=$STATE" >> $GITHUB_OUTPUT
+          if [ "$STATE" = "closed" ]; then
+            echo "alreadyClosed=true" >> $GITHUB_OUTPUT
+          else
+            echo "alreadyClosed=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Update Sheet (USER_CLOSED)
+        if: steps.check_pr.outputs.alreadyClosed != 'true'
         env:
           UUID: ${{ steps.inputs.outputs.uuid }}
         run: |
@@ -73,6 +91,7 @@ jobs:
             -d "$BODY"
 
       - name: Close PR
+        if: steps.check_pr.outputs.alreadyClosed != 'true'
         id: close_pr
         env:
           PR_NUMBER: ${{ steps.inputs.outputs.pr_number }}
@@ -90,7 +109,7 @@ jobs:
           fi
 
       - name: Notify Slack Close Success
-        if: steps.close_pr.outputs.success == 'true'
+        if: steps.check_pr.outputs.alreadyClosed != 'true' && steps.close_pr.outputs.success == 'true'
         env:
           SLACK_USER_ID: ${{ steps.inputs.outputs.slack_user_id }}
           PR_NUMBER: ${{ steps.inputs.outputs.pr_number }}
@@ -104,7 +123,7 @@ jobs:
             }"
 
       - name: Notify Slack Close Failed
-        if: steps.close_pr.outputs.success != 'true'
+        if: steps.check_pr.outputs.alreadyClosed != 'true' && steps.close_pr.outputs.success != 'true'
         env:
           SLACK_USER_ID: ${{ steps.inputs.outputs.slack_user_id }}
         run: |
