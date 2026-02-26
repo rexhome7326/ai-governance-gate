@@ -250,127 +250,99 @@ jobs:
         run: |
           echo "FILE_NAME in notify step: [$FILE_NAME]"
 
-          if [[ "$VERDICT" == *"PASS"* ]]; then
-            RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
-              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/json; charset=utf-8" \
-              -d '{
-                "channel": "'$SLACK_USER_ID'",
-                "attachments": [
-                  {
-                    "color": "#2EB67D",
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":white_check_mark: 你提交的檔案 => *'"${FILE_NAME}"'* :star-struck: *已通過審核*"
-                        }
-                      },
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": "*AI Review 結果如下*\n\n• 風險: *'"${VERDICT}"'*\n• CodeQL: '"${CODEQL}"'\n• SemGrep: '"${SEMGREP}"'\n• Gemini Scan: '"${GEMINI}"'\n• OpenAI Scan: '"${OPENAI}"'\n• Avg: *'"${AVG}"'*"
-                        }
-                      },
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": "_詳細請參考訊息內的附件_\n\n現在請你選擇操作："
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "text": { "type": "plain_text", "text": "確認上傳檔案" },
-                            "style": "primary",
-                            "value": "{\"action_id\":\"confirm_upload\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\",\"slack_user_id\":\"'"${SLACK_USER_ID}"'\"}",
-                            "action_id": "confirm_upload"
-                          },
-                          {
-                            "type": "button",
-                            "text": { "type": "plain_text", "text": "重新提交檔案" },
-                            "url": "'"${FORM_EDIT_URL}"'&entry.2025086705='"${UUID}"'",
-                            "value": "resubmit",
-                            "action_id": "resubmit"
-                          },
-                          {
-                            "type": "button",
-                            "text": { "type": "plain_text", "text": "結束這次 review" },
-                            "style": "danger",
-                            "value": "{\"action_id\":\"cancel_review\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\",\"slack_user_id\":\"'"${SLACK_USER_ID}"'\"}",
-                            "action_id": "cancel_review"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }')
-          else
-            RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
-              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/json; charset=utf-8" \
-              -d '{
-                "channel": "'$SLACK_USER_ID'",
-                "attachments": [
-                  {
-                    "color": "#E01E5A",
-                    "blocks": [
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": ":x: 你提交的檔案 => *'"${FILE_NAME}"'* :melting_face: *未通過審核*"
-                        }
-                      },
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": "*AI Review 結果如下*\n\n• 風險: *'"${VERDICT}"'*\n• CodeQL: '"${CODEQL}"'\n• SemGrep: '"${SEMGREP}"'\n• Gemini Scan: '"${GEMINI}"'\n• OpenAI Scan: '"${OPENAI}"'\n• Avg: *'"${AVG}"'*"
-                        }
-                      },
-                      {
-                        "type": "section",
-                        "text": {
-                          "type": "mrkdwn",
-                          "text": "_詳細請參考訊息內的附件_\n\n現在請你選擇操作："
-                        }
-                      },
-                      {
-                        "type": "actions",
-                        "elements": [
-                          {
-                            "type": "button",
-                            "text": { "type": "plain_text", "text": "重新提交檔案" },
-                            "url": "'"${FORM_EDIT_URL}"'&entry.2025086705='"${UUID}"'",
-                            "value": "resubmit",
-                            "action_id": "resubmit"
-                          },
-                          {
-                            "type": "button",
-                            "text": { "type": "plain_text", "text": "取消這次 review" },
-                            "style": "danger",
-                            "value": "{\"action_id\":\"cancel_review\",\"uuid\":\"'"${UUID}"'\",\"branch\":\"'"${BRANCH}"'\",\"pr_number\":\"'"${PR_NUMBER}"'\",\"slack_user_id\":\"'"${SLACK_USER_ID}"'\"}",
-                            "action_id": "cancel_review"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                ]
-              }')
-          fi
+          # Phase 1: 先發一則暫存訊息，取得 ts 與 channel
+          RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d '{"channel": "'"$SLACK_USER_ID"'", "text": "AI Review 結果載入中…"}')
           echo "chat.postMessage response: $RESPONSE"
           THREAD_TS=$(echo "$RESPONSE" | jq -r '.ts // empty')
           CHANNEL_ID=$(echo "$RESPONSE" | jq -r '.channel // empty')
-          echo "thread_ts=${THREAD_TS:-}" >> $GITHUB_OUTPUT
-          echo "channel_id=${CHANNEL_ID:-}" >> $GITHUB_OUTPUT
+          if [ -z "$THREAD_TS" ] || [ -z "$CHANNEL_ID" ]; then
+            echo "Error: failed to get ts or channel from postMessage"
+            exit 1
+          fi
+
+          # 組 entry.2025086705 的值（JSON 後 URL-encode）
+          ENTRY_JSON=$(jq -n -c --arg u "$UUID" --arg t "$THREAD_TS" --arg c "$CHANNEL_ID" '{UUID:$u,THREAD_TS:$t,CHANNEL_ID:$c}')
+          ENTRY_VALUE=$(printf '%s' "$ENTRY_JSON" | jq -sRr @uri)
+          RESUBMIT_URL="${FORM_EDIT_URL}&entry.2025086705=${ENTRY_VALUE}"
+
+          # Phase 2: chat.update 更新為完整 blocks，按鈕 URL 帶入 THREAD_TS & CHANNEL_ID
+          if [[ "$VERDICT" == *"PASS"* ]]; then
+            UPDATE_PAYLOAD=$(jq -n -c \
+              --arg ch "$CHANNEL_ID" \
+              --arg ts "$THREAD_TS" \
+              --arg file_name "$FILE_NAME" \
+              --arg verdict "$VERDICT" \
+              --arg codeql "$CODEQL" \
+              --arg semgrep "$SEMGREP" \
+              --arg gemini "$GEMINI" \
+              --arg openai "$OPENAI" \
+              --arg avg "$AVG" \
+              --arg uuid "$UUID" \
+              --arg branch "$BRANCH" \
+              --arg pr_number "$PR_NUMBER" \
+              --arg slack_user_id "$SLACK_USER_ID" \
+              --arg resubmit_url "$RESUBMIT_URL" \
+              '{
+                channel: $ch,
+                ts: $ts,
+                attachments: [{
+                  color: "#2EB67D",
+                  blocks: [
+                    {type: "section", text: {type: "mrkdwn", text: (":white_check_mark: 你提交的檔案 => *" + $file_name + "* :star-struck: *已通過審核*")}},
+                    {type: "section", text: {type: "mrkdwn", text: ("*AI Review 結果如下*\n\n• 風險: *" + $verdict + "*\n• CodeQL: " + $codeql + "\n• SemGrep: " + $semgrep + "\n• Gemini Scan: " + $gemini + "\n• OpenAI Scan: " + $openai + "\n• Avg: *" + $avg + "*")}},
+                    {type: "section", text: {type: "mrkdwn", text: "_詳細請參考訊息內的附件_\n\n現在請你選擇操作："}},
+                    {type: "actions", elements: [
+                      {type: "button", text: {type: "plain_text", text: "確認上傳檔案"}, style: "primary", value: ({"action_id":"confirm_upload","uuid":$uuid,"branch":$branch,"pr_number":$pr_number,"slack_user_id":$slack_user_id} | @json), action_id: "confirm_upload"},
+                      {type: "button", text: {type: "plain_text", text: "重新提交檔案"}, url: $resubmit_url, value: "resubmit", action_id: "resubmit"},
+                      {type: "button", text: {type: "plain_text", text: "結束這次 review"}, style: "danger", value: ({"action_id":"cancel_review","uuid":$uuid,"branch":$branch,"pr_number":$pr_number,"slack_user_id":$slack_user_id} | @json), action_id: "cancel_review"}
+                    ]}
+                  ]
+                }]
+              }')
+          else
+            UPDATE_PAYLOAD=$(jq -n -c \
+              --arg ch "$CHANNEL_ID" \
+              --arg ts "$THREAD_TS" \
+              --arg file_name "$FILE_NAME" \
+              --arg verdict "$VERDICT" \
+              --arg codeql "$CODEQL" \
+              --arg semgrep "$SEMGREP" \
+              --arg gemini "$GEMINI" \
+              --arg openai "$OPENAI" \
+              --arg avg "$AVG" \
+              --arg uuid "$UUID" \
+              --arg branch "$BRANCH" \
+              --arg pr_number "$PR_NUMBER" \
+              --arg slack_user_id "$SLACK_USER_ID" \
+              --arg resubmit_url "$RESUBMIT_URL" \
+              '{
+                channel: $ch,
+                ts: $ts,
+                attachments: [{
+                  color: "#E01E5A",
+                  blocks: [
+                    {type: "section", text: {type: "mrkdwn", text: (":x: 你提交的檔案 => *" + $file_name + "* :melting_face: *未通過審核*")}},
+                    {type: "section", text: {type: "mrkdwn", text: ("*AI Review 結果如下*\n\n• 風險: *" + $verdict + "*\n• CodeQL: " + $codeql + "\n• SemGrep: " + $semgrep + "\n• Gemini Scan: " + $gemini + "\n• OpenAI Scan: " + $openai + "\n• Avg: *" + $avg + "*")}},
+                    {type: "section", text: {type: "mrkdwn", text: "_詳細請參考訊息內的附件_\n\n現在請你選擇操作："}},
+                    {type: "actions", elements: [
+                      {type: "button", text: {type: "plain_text", text: "重新提交檔案"}, url: $resubmit_url, value: "resubmit", action_id: "resubmit"},
+                      {type: "button", text: {type: "plain_text", text: "取消這次 review"}, style: "danger", value: ({"action_id":"cancel_review","uuid":$uuid,"branch":$branch,"pr_number":$pr_number,"slack_user_id":$slack_user_id} | @json), action_id: "cancel_review"}
+                    ]}
+                  ]
+                }]
+              }')
+          fi
+
+          curl -s -X POST https://slack.com/api/chat.update \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$UPDATE_PAYLOAD"
+
+          echo "thread_ts=${THREAD_TS}" >> $GITHUB_OUTPUT
+          echo "channel_id=${CHANNEL_ID}" >> $GITHUB_OUTPUT
 
       - name: Upload Reports To Slack
         env:
