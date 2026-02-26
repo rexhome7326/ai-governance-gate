@@ -15,6 +15,12 @@ on:
         required: true
       slack_user_id:
         required: true
+      response_url:
+        required: true
+      original_blocks_base64:
+        required: true
+      attachment_color:
+        required: true
 
 jobs:
   handle-click-upload-button:
@@ -42,6 +48,12 @@ jobs:
           echo "branch=$BRANCH" >> $GITHUB_OUTPUT
           echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
           echo "slack_user_id=$SLACK_USER_ID" >> $GITHUB_OUTPUT
+
+      - name: Decode Slack payload
+        env:
+          ORIGINAL_BLOCKS_B64: ${{ github.event.inputs.original_blocks_base64 }}
+        run: |
+          echo "$ORIGINAL_BLOCKS_B64" | base64 -d > original_blocks.json
 
       - name: Log inputs
         env:
@@ -125,26 +137,23 @@ jobs:
       - name: Notify Slack Upload Success
         if: steps.check_pr.outputs.alreadyClosed != 'true' && steps.close_pr.outputs.success == 'true'
         env:
-          SLACK_USER_ID: ${{ steps.inputs.outputs.slack_user_id }}
+          RESPONSE_URL: ${{ github.event.inputs.response_url }}
+          ATTACHMENT_COLOR: ${{ github.event.inputs.attachment_color }}
           UPLOAD_URL: ${{ steps.upload.outputs.url }}
         run: |
-          curl -s -X POST https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            -d "{
-              \"channel\": \"$SLACK_USER_ID\",
-              \"text\": \":white_check_mark: 已上傳檔案\n<$UPLOAD_URL|開啟連結>\"
-            }"
+          SUCCESS_BLOCKS=$(jq -c --arg url "$UPLOAD_URL" '(.[0:3] + [{type: "section", text: {type: "mrkdwn", text: (":white_check_mark: 已上傳檔案\n<" + $url + "|開啟連結>")}}])' original_blocks.json)
+          BODY=$(jq -n -c --arg color "$ATTACHMENT_COLOR" --argjson blocks "$SUCCESS_BLOCKS" '{replace_original: true, attachments: [{color: $color, blocks: $blocks}]}')
+          curl -s -X POST "$RESPONSE_URL" -H "Content-Type: application/json" -d "$BODY"
 
       - name: Notify Slack Upload Failed
         if: steps.check_pr.outputs.alreadyClosed != 'true' && steps.close_pr.outputs.success != 'true'
         env:
-          SLACK_USER_ID: ${{ steps.inputs.outputs.slack_user_id }}
+          RESPONSE_URL: ${{ github.event.inputs.response_url }}
+          ATTACHMENT_COLOR: ${{ github.event.inputs.attachment_color }}
         run: |
-          curl -s -X POST https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            -d "{
-              \"channel\": \"$SLACK_USER_ID\",
-              \"text\": \":x: 上傳失敗，請再重新按一次\"
-            }"
+          FAIL_BLOCKS=$(jq -c '(.[0:3] + [{type: "section", text: {type: "mrkdwn", text: ":x: 上傳失敗，請再重新按一次"}}])' original_blocks.json)
+          BODY=$(jq -n -c --arg color "$ATTACHMENT_COLOR" --argjson blocks "$FAIL_BLOCKS" '{replace_original: true, attachments: [{color: $color, blocks: $blocks}]}')
+          curl -s -X POST "$RESPONSE_URL" -H "Content-Type: application/json" -d "$BODY"
+          sleep 3
+          RESTORE_BODY=$(jq -n -c --arg color "$ATTACHMENT_COLOR" --slurpfile blocks original_blocks.json '{replace_original: true, attachments: [{color: $color, blocks: $blocks[0]}]}')
+          curl -s -X POST "$RESPONSE_URL" -H "Content-Type: application/json" -d "$RESTORE_BODY"
