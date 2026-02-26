@@ -49,6 +49,11 @@ jobs:
           FORM_EDIT_URL="${FORM_EDIT_URL:-}"
           echo "form_edit_url=$FORM_EDIT_URL" >> $GITHUB_OUTPUT
 
+          THREAD_TS=$(echo "$PR_BODY" | jq -r '.threadTs // .thread_ts // .threadId // empty' 2>/dev/null || true)
+          echo "thread_ts=${THREAD_TS:-}" >> $GITHUB_OUTPUT
+          CHANNEL_ID=$(echo "$PR_BODY" | jq -r '.channelId // .channel_id // empty' 2>/dev/null || true)
+          echo "channel_id=${CHANNEL_ID:-}" >> $GITHUB_OUTPUT
+
       - name: Find And Unzip
         run: |
           mkdir -p ${{ env.SCAN_DIR }} reports
@@ -235,20 +240,37 @@ jobs:
           UUID: ${{ steps.pr_body.outputs.uuid }}
           BRANCH: ${{ github.head_ref || github.ref_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXISTING_THREAD_TS: ${{ steps.pr_body.outputs.thread_ts }}
+          EXISTING_CHANNEL_ID: ${{ steps.pr_body.outputs.channel_id }}
         run: |
           echo "FILE_NAME in notify step: [$FILE_NAME]"
 
-          # Phase 1: 先發一則暫存訊息，取得 ts 與 channel
-          RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            -d '{"channel": "'"$SLACK_USER_ID"'", "text": "AI Review 結果載入中…"}')
-          echo "chat.postMessage response: $RESPONSE"
-          THREAD_TS=$(echo "$RESPONSE" | jq -r '.ts // empty')
-          CHANNEL_ID=$(echo "$RESPONSE" | jq -r '.channel // empty')
-          if [ -z "$THREAD_TS" ] || [ -z "$CHANNEL_ID" ]; then
-            echo "Error: failed to get ts or channel from postMessage"
-            exit 1
+          # 決定 THREAD_TS / CHANNEL_ID：PR body 有帶則沿用，否則發新訊息取得
+          if [ -n "$EXISTING_CHANNEL_ID" ] && [ -n "$EXISTING_THREAD_TS" ]; then
+            CHANNEL_ID="$EXISTING_CHANNEL_ID"
+            THREAD_TS="$EXISTING_THREAD_TS"
+            echo "Using existing message: channel=$CHANNEL_ID ts=$THREAD_TS"
+            # 刪除該 thread 內含檔案的子訊息（讓後續重新上傳）
+            REPLIES=$(curl -s -H "Authorization: Bearer $SLACK_BOT_TOKEN" "https://slack.com/api/conversations.replies?channel=${CHANNEL_ID}&ts=${THREAD_TS}")
+            echo "$REPLIES" | jq -r --arg root "$THREAD_TS" '.messages[]? | select(.ts != $root) | select(.files != null and (.files | length) > 0) | .ts' | while read -r reply_ts; do
+              [ -z "$reply_ts" ] && continue
+              curl -s -X POST https://slack.com/api/chat.delete \
+                -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+                -H "Content-Type: application/json" \
+                -d "{\"channel\":\"$CHANNEL_ID\",\"ts\":\"$reply_ts\"}"
+            done
+          else
+            RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
+              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+              -H "Content-Type: application/json; charset=utf-8" \
+              -d '{"channel": "'"$SLACK_USER_ID"'", "text": "AI Review 結果載入中…"}')
+            echo "chat.postMessage response: $RESPONSE"
+            THREAD_TS=$(echo "$RESPONSE" | jq -r '.ts // empty')
+            CHANNEL_ID=$(echo "$RESPONSE" | jq -r '.channel // empty')
+            if [ -z "$THREAD_TS" ] || [ -z "$CHANNEL_ID" ]; then
+              echo "Error: failed to get ts or channel from postMessage"
+              exit 1
+            fi
           fi
 
           # 組 entry.2025086705 的值（JSON 後 URL-encode）
