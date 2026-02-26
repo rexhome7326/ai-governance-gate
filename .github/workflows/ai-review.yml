@@ -104,11 +104,6 @@ jobs:
         if: steps.check_source.outputs.run_scans == 'true'
         run: cp reports/javascript.sarif reports/codeql.sarif
 
-      - name: Create empty CodeQL SARIF
-        if: steps.check_source.outputs.run_scans != 'true'
-        run: |
-          echo '{"$schema":"https://raw.githubusercontent.com/oasis-tcs/sarif/master/schemata/sarif-schema-2.1.0.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"CodeQL","rules":[]}},"results":[]}]}' > reports/codeql.sarif
-
       # --------------------
       # Install Semgrep
       # --------------------
@@ -124,20 +119,12 @@ jobs:
         run: |
           semgrep scan src --config=.github/scripts/semgrep.yml --json > reports/semgrep.json
 
-      - name: Create empty Semgrep JSON
-        if: steps.check_source.outputs.run_scans != 'true'
-        run: echo '{"results":[]}' > reports/semgrep.json
-
       # --------------------
       # Gemini AI Scan
       # --------------------
       - name: Gemini Scan
         if: steps.check_source.outputs.run_scans == 'true'
         run: node .github/scripts/gemini_scan.js
-
-      - name: Create empty Gemini JSON
-        if: steps.check_source.outputs.run_scans != 'true'
-        run: echo '{"engine":"gemini","summary":"No source to scan","severity":"low","details":[]}' > reports/gemini.json
 
       # --------------------
       # OpenAI Scan (optional)
@@ -146,20 +133,18 @@ jobs:
         if: steps.check_source.outputs.run_scans == 'true'
         run: node .github/scripts/openai_scan.js
 
-      - name: Create empty OpenAI JSON
-        if: steps.check_source.outputs.run_scans != 'true'
-        run: echo '{"engine":"openai","summary":"No source to scan","severity":"low","details":[]}' > reports/openai.json
-
       # --------------------
       # Score Results
       # --------------------
       - name: Score Results
+        if: steps.check_source.outputs.run_scans == 'true'
         run: node .github/scripts/score.js
 
       # --------------------
       # Export Score to env
       # --------------------
       - name: Export Score
+        if: steps.check_source.outputs.run_scans == 'true'
         run: |
           CODEQL=$(jq -r .codeql reports/score.json)
           SEMGREP=$(jq -r .semgrep reports/score.json)
@@ -185,6 +170,7 @@ jobs:
       # Build Report
       # --------------------
       - name: Build Report
+        if: steps.check_source.outputs.run_scans == 'true'
         run: node .github/scripts/build_report.js
 
       # --------------------
@@ -192,6 +178,7 @@ jobs:
       # --------------------
       - name: Upload Report
         id: upload-report
+        if: steps.check_source.outputs.run_scans == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ai-review-report
@@ -240,6 +227,7 @@ jobs:
             -d "$BODY"
       - name: Notify Slack With Actions
         id: notify_slack
+        if: steps.check_source.outputs.run_scans == 'true'
         env:
           SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
           FILE_NAME: ${{ steps.check_source.outputs.file_name }}
@@ -345,6 +333,7 @@ jobs:
           echo "channel_id=${CHANNEL_ID}" >> $GITHUB_OUTPUT
 
       - name: Upload Reports To Slack
+        if: steps.check_source.outputs.run_scans == 'true'
         env:
           SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
           THREAD_TS: ${{ steps.notify_slack.outputs.thread_ts }}
