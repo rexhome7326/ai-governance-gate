@@ -3,6 +3,7 @@ import fs from 'fs';
 const fetch = global.fetch;
 const API_KEY = process.env.GEMINI_API_KEY;
 const SRC_DIR = process.env.SCAN_DIR || 'src';
+const REPORTS_DIR = 'reports';
 
 function collectCode(dir) {
   let output = '';
@@ -18,30 +19,59 @@ function collectCode(dir) {
 }
 
 async function scan() {
+  const errorsPath = `${REPORTS_DIR}/codeql_semgrep_errors.json`;
+  if (!fs.existsSync(errorsPath)) {
+    fs.mkdirSync(REPORTS_DIR, { recursive: true });
+    fs.writeFileSync(
+      `${REPORTS_DIR}/gemini_report.md`,
+      '# Gemini Scan\n\n無 CodeQL/Semgrep 錯誤資料。'
+    );
+    fs.writeFileSync(
+      `${REPORTS_DIR}/gemini.json`,
+      JSON.stringify({ engine: 'gemini', score_hint: 0, summary: '無輸入' }, null, 2)
+    );
+    return;
+  }
+
+  const errorsJson = JSON.parse(fs.readFileSync(errorsPath, 'utf8'));
   const code = collectCode(SRC_DIR);
 
   const prompt = `
-You are an application security reviewer.
-Return ONLY JSON with this format:
-{
-  "engine": "gemini",
-  "summary": "...",
-  "severity": "low|medium|high|critical",
-  "score_hint": 1-10,
-  "details": ["issue1", "issue2"]
-}
+你是一位應用程式安全審查員。請根據以下「CodeQL 與 Semgrep 的錯誤清單」以及「原始碼內容」，產出一份「中文」的掃描建議報告。
 
-Review this code:
+## 輸入：CodeQL & Semgrep 錯誤（JSON）
+${JSON.stringify(errorsJson, null, 2)}
+
+## 輸入：原始碼
 ${code}
+
+## 輸出要求
+請「只」回傳一份 Markdown，結構如下（全部使用繁體中文）：
+
+---
+## 問題
+針對每個發現的問題，請列出：
+- **程式碼內容**：出問題的程式碼片段
+- **位置**：檔案路徑與行號
+
+## 解法
+針對每個問題，請列出：
+- **嚴重程度**：1～10（1 為不嚴重，10 為最嚴重）
+- **是否必須修復**：是 / 否
+- **修復方式**：具體的修復程式碼或步驟
+
+## 分數
+請在報告最後給一個整體 **1～10 分** 的嚴重程度分數（1 為不嚴重，10 為最嚴重）。格式為：\`分數：N\`（N 為 1～10 的整數）。
+---
 `;
 
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
     {
       method: 'POST',
-      headers: { 
+      headers: {
         'x-goog-api-key': API_KEY,
-        'Content-Type': 'application/json' 
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }]
@@ -50,12 +80,38 @@ ${code}
   );
 
   const data = await res.json();
-  let raw = data.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-  raw = raw.trim().replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim() || '{}';
-  console.log(raw);
+  let rawMd =
+    data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+    '# Gemini Scan\n\n無產出。';
 
-  fs.mkdirSync('reports', { recursive: true });
-  fs.writeFileSync('reports/gemini.json', raw);
+  rawMd = rawMd
+    .replace(/^```(?:markdown|md)?\s*\n?/i, '')
+    .replace(/\n?```\s*$/i, '')
+    .trim();
+
+  const scoreMatch = rawMd.match(/分數[：:]\s*(\d+)/);
+  const scoreHint = scoreMatch ? Math.min(10, Math.max(1, parseInt(scoreMatch[1], 10))) : 5;
+
+  fs.mkdirSync(REPORTS_DIR, { recursive: true });
+  fs.writeFileSync(`${REPORTS_DIR}/gemini_report.md`, rawMd);
+  fs.writeFileSync(
+    `${REPORTS_DIR}/gemini.json`,
+    JSON.stringify(
+      {
+        engine: 'gemini',
+        summary: '由 CodeQL/Semgrep 錯誤與原始碼產出的中文建議',
+        severity: scoreHint >= 7 ? 'high' : scoreHint >= 4 ? 'medium' : 'low',
+        score_hint: scoreHint,
+        details: []
+      },
+      null,
+      2
+    )
+  );
+  console.log('Gemini report and score written.');
 }
 
-scan();
+scan().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
