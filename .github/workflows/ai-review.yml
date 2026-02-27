@@ -125,6 +125,13 @@ jobs:
           semgrep scan src --config=.github/scripts/semgrep.yml --json > reports/semgrep.json
 
       # --------------------
+      # Get codeql & semgrep error message
+      # --------------------
+      - name: Get codeql & semgrep error message
+        if: steps.check_source.outputs.run_scans == 'true'
+        run: node .github/scripts/get_codeql_semgrep_errors.js
+
+      # --------------------
       # Gemini AI Scan
       # --------------------
       - name: Gemini Scan
@@ -175,8 +182,13 @@ jobs:
       # Build Report
       # --------------------
       - name: Build Report
+        id: build_report
         if: steps.check_source.outputs.run_scans == 'true'
-        run: node .github/scripts/build_report.js
+        env:
+          FILE_NAME: ${{ steps.check_source.outputs.file_name }}
+        run: |
+          REPORT_PATH=$(node .github/scripts/build_report.js)
+          echo "report_path=$REPORT_PATH" >> $GITHUB_OUTPUT
 
       # --------------------
       # Upload Report Artifact
@@ -250,15 +262,6 @@ jobs:
             CHANNEL_ID="$EXISTING_CHANNEL_ID"
             THREAD_TS="$EXISTING_THREAD_TS"
             echo "Using existing message: channel=$CHANNEL_ID ts=$THREAD_TS"
-            # 刪除該 thread 內含檔案的子訊息（讓後續重新上傳）
-            REPLIES=$(curl -s -H "Authorization: Bearer $SLACK_BOT_TOKEN" "https://slack.com/api/conversations.replies?channel=${CHANNEL_ID}&ts=${THREAD_TS}")
-            echo "$REPLIES" | jq -r --arg root "$THREAD_TS" '.messages[]? | select(.ts != $root) | select(.files != null and (.files | length) > 0) | .ts' | while read -r reply_ts; do
-              [ -z "$reply_ts" ] && continue
-              curl -s -X POST https://slack.com/api/chat.delete \
-                -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-                -H "Content-Type: application/json" \
-                -d "{\"channel\":\"$CHANNEL_ID\",\"ts\":\"$reply_ts\"}"
-            done
           else
             RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
               -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
@@ -360,49 +363,48 @@ jobs:
           SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
           THREAD_TS: ${{ steps.notify_slack.outputs.thread_ts }}
           CHANNEL_ID: ${{ steps.notify_slack.outputs.channel_id }}
+          REPORT_PATH: ${{ steps.build_report.outputs.report_path }}
         run: |
-          for FILE in reports/*; do
-            [ -f "$FILE" ] || continue
+          FILE="$REPORT_PATH"
+          [ -z "$FILE" ] || [ ! -f "$FILE" ] && { echo "No report file to upload."; exit 0; }
 
-            echo "Uploading $FILE"
-            FILE_SIZE=$(wc -c < "$FILE")
-            FILE_NAME=$(basename "$FILE")
+          echo "Uploading $FILE"
+          FILE_SIZE=$(wc -c < "$FILE")
+          FILE_NAME=$(basename "$FILE")
 
-            # 取得 upload URL
-            echo "=== get upload URL ==="
-            echo "FILE_NAME=$FILE_NAME FILE_SIZE=$FILE_SIZE"
-            RESPONSE=$(curl -s -S -X POST https://slack.com/api/files.getUploadURLExternal \
-              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/x-www-form-urlencoded" \
-              --data-urlencode "filename=$FILE_NAME" \
-              --data-urlencode "length=$FILE_SIZE")
-            echo "getUploadURLExternal response: $RESPONSE"
+          # 取得 upload URL
+          echo "=== get upload URL ==="
+          echo "FILE_NAME=$FILE_NAME FILE_SIZE=$FILE_SIZE"
+          RESPONSE=$(curl -s -S -X POST https://slack.com/api/files.getUploadURLExternal \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "filename=$FILE_NAME" \
+            --data-urlencode "length=$FILE_SIZE")
+          echo "getUploadURLExternal response: $RESPONSE"
 
-            UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url // empty')
-            FILE_ID=$(echo "$RESPONSE" | jq -r '.file_id // empty')
+          UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url // empty')
+          FILE_ID=$(echo "$RESPONSE" | jq -r '.file_id // empty')
 
-            if [ -z "$UPLOAD_URL" ] || [ -z "$FILE_ID" ]; then
-              echo "Error: getUploadURLExternal failed: $RESPONSE"
-              exit 1
-            fi
+          if [ -z "$UPLOAD_URL" ] || [ -z "$FILE_ID" ]; then
+            echo "Error: getUploadURLExternal failed: $RESPONSE"
+            exit 1
+          fi
 
-            # 上傳 binary
-            echo "=== upload binary ==="
-            echo "UPLOAD_URL=$UPLOAD_URL FILE=$FILE"
-            RESPONSE_PUT=$(curl -s -f -X POST "$UPLOAD_URL" \
-              -H "Content-Type: application/octet-stream" \
-              --data-binary @"$FILE")
-            echo "POST response: $RESPONSE_PUT"
+          # 上傳 binary
+          echo "=== upload binary ==="
+          echo "UPLOAD_URL=$UPLOAD_URL FILE=$FILE"
+          RESPONSE_PUT=$(curl -s -f -X POST "$UPLOAD_URL" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"$FILE")
+          echo "POST response: $RESPONSE_PUT"
 
-            # 完成上傳並指定 thread
-            echo "=== to thread ==="
-            echo "FILE_ID=$FILE_ID FILE_NAME=$FILE_NAME CHANNEL_ID=$CHANNEL_ID THREAD_TS=$THREAD_TS"
-            RESPONSE_COMPLETE=$(curl -s -S -X POST https://slack.com/api/files.completeUploadExternal \
-              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/x-www-form-urlencoded" \
-              --data-urlencode "files=[{\"id\":\"$FILE_ID\",\"title\":\"$FILE_NAME\"}]" \
-              --data-urlencode "channel_id=$CHANNEL_ID" \
-              --data-urlencode "thread_ts=$THREAD_TS")
-            echo "completeUploadExternal response: $RESPONSE_COMPLETE"
-
-          done
+          # 完成上傳並指定 thread
+          echo "=== to thread ==="
+          echo "FILE_ID=$FILE_ID FILE_NAME=$FILE_NAME CHANNEL_ID=$CHANNEL_ID THREAD_TS=$THREAD_TS"
+          RESPONSE_COMPLETE=$(curl -s -S -X POST https://slack.com/api/files.completeUploadExternal \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "files=[{\"id\":\"$FILE_ID\",\"title\":\"$FILE_NAME\"}]" \
+            --data-urlencode "channel_id=$CHANNEL_ID" \
+            --data-urlencode "thread_ts=$THREAD_TS")
+          echo "completeUploadExternal response: $RESPONSE_COMPLETE"
