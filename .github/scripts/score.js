@@ -12,7 +12,7 @@ const semgrep = semgrepResult.score;
 const gemini = geminiResult.score;
 const openai = openaiResult.score;
 
-const avg = ((codeql * 3 + semgrep * 3 + gemini * 2 + openai * 2) / 10).toFixed(1);
+const avg = ((codeql * 1 + semgrep * 1 + gemini * 4 + openai * 4) / 10).toFixed(1);
 
 let verdict = 'S3 PASS';
 if (avg >= 9) verdict = 'S0 FAIL';

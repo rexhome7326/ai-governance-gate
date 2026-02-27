@@ -86,7 +86,7 @@ console.log(prompt);
   let rawMd =
     data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
     '# Gemini Scan\n\n無產出。';
-
+  console.log(rawMd);
   rawMd = rawMd
     .replace(/^```(?:markdown|md)?\s*\n?/i, '')
     .replace(/\n?```\s*$/i, '')
