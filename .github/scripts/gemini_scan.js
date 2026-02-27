@@ -67,9 +67,14 @@ ${code}
 
 console.log(prompt);
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`,
-    {
+  const GEMINI_URL =
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 5000;
+
+  let data;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(GEMINI_URL, {
       method: 'POST',
       headers: {
         'x-goog-api-key': API_KEY,
@@ -78,10 +83,23 @@ console.log(prompt);
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }]
       })
-    }
-  );
+    });
+    data = await res.json();
 
-  const data = await res.json();
+    const non2xx = res.status < 200 || res.status >= 300;
+    if (non2xx && attempt < MAX_RETRIES) {
+      console.warn(
+        `Gemini HTTP ${res.status} (attempt ${attempt}/${MAX_RETRIES}), retry in ${RETRY_DELAY_MS / 1000}s...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      continue;
+    }
+    if (data?.error || non2xx) {
+      throw new Error(data?.error?.message || `HTTP ${res.status}` || JSON.stringify(data?.error));
+    }
+    break;
+  }
+
   console.log(data);
   let rawMd =
     data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||

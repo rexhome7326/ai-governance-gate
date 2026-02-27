@@ -61,27 +61,49 @@ ${errorsJson}
 
 console.log(prompt);
 
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'gpt-4.1-mini',
-      messages: [
-        {
-          role: 'system',
-          content:
-            '你是安全程式碼審查員。請根據 Gemini 報告與原始錯誤清單，判斷解法是否正確、修正語句、並產出最終繁體中文報告（含問題、解法、分數）。'
-        },
-        { role: 'user', content: prompt }
-      ],
-      temperature: 0.2
-    })
-  });
+  const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 5000;
 
-  const data = await res.json();
+  let data;
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(OPENAI_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'gpt-4.1-mini',
+        messages: [
+          {
+            role: 'system',
+            content:
+              '你是安全程式碼審查員。請根據 Gemini 報告與原始錯誤清單，判斷解法是否正確、修正語句、並產出最終繁體中文報告（含問題、解法、分數）。'
+          },
+          { role: 'user', content: prompt }
+        ],
+        temperature: 0.2
+      })
+    });
+    data = await res.json();
+
+    const non2xx = res.status < 200 || res.status >= 300;
+    if (non2xx && attempt < MAX_RETRIES) {
+      console.warn(
+        `OpenAI HTTP ${res.status} (attempt ${attempt}/${MAX_RETRIES}), retry in ${RETRY_DELAY_MS / 1000}s...`
+      );
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      continue;
+    }
+    if (data?.error || non2xx) {
+      throw new Error(
+        data?.error?.message || `HTTP ${res.status}` || JSON.stringify(data?.error)
+      );
+    }
+    break;
+  }
+
   console.log(data);
   let rawMd = data.choices?.[0]?.message?.content?.trim() || '# OpenAI Scan\n\n無產出。';
 
