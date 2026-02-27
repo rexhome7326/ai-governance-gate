@@ -65,8 +65,10 @@ ${code}
 ---
 `;
 
+console.log(prompt);
+
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent`,
     {
       method: 'POST',
       headers: {
@@ -80,6 +82,7 @@ ${code}
   );
 
   const data = await res.json();
+  console.log(data);
   let rawMd =
     data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
     '# Gemini Scan\n\n無產出。';

@@ -59,6 +59,8 @@ ${errorsJson}
 ---
 `;
 
+console.log(prompt);
+
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -80,6 +82,7 @@ ${errorsJson}
   });
 
   const data = await res.json();
+  console.log(data);
   let rawMd = data.choices?.[0]?.message?.content?.trim() || '# OpenAI Scan\n\n無產出。';
 
   rawMd = rawMd
