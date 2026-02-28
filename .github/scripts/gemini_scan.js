@@ -40,7 +40,8 @@ async function scan() {
 你是一位應用程式安全審查員。請根據以下「CodeQL 與 Semgrep 的錯誤清單」以及「原始碼內容」，產出一份「中文」的掃描建議報告。
 
 最高原則：
-**LLM 安全意識 最高原則**：開發過程中須防範專屬安全威脅（如 Prompt Injection），參考 [OWASP Top 10 for LLM](https://owasp.org)。
+- **LLM 安全意識 最高原則**：開發過程中須防範專屬安全威脅（如 Prompt Injection），參考 [OWASP Top 10 for LLM](https://owasp.org)。
+- **修復方式條件**：修復的答案必須是一個讓你（AI 或是其他 reviewer）再次 review 一定要會過的具體修復程式碼或步驟，而不是一個抽象的答案，或是基礎的答案。
 
 ## 輸入：CodeQL & Semgrep 錯誤（JSON）
 ${JSON.stringify(errorsJson, null, 2)}
@@ -58,8 +59,7 @@ ${code}
 - **位置**：檔案路徑與行號
 - **嚴重程度**：1～10（1 為不嚴重，10 為最嚴重）
 - **是否必須修復**：是 / 否
-- **修復方式條件**：
-  - 一個讓你（AI 或是其他 reviewer）再次 review 一定要會過的具體修復程式碼或步驟
+- **修復方式條件**：具體修復程式碼或步驟
 
 ## 分數
 請在報告最後給一個整體 **1～10 分** 的嚴重程度分數（1 為不嚴重，10 為最嚴重）。格式為：\`分數：N\`（N 為 1～10 的整數）。
