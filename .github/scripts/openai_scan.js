@@ -33,7 +33,8 @@ async function scan() {
 1) 判斷 Gemini 的解法是否正確、用語是否需要修正、是否有更好的解法；
 2) 產出一份「最終版」的繁體中文 Markdown 報告。
 
-**LLM 安全意識 最高原則**：開發過程中須防範專屬安全威脅（如 Prompt Injection），參考 [OWASP Top 10 for LLM](https://owasp.org)。
+- **LLM 安全意識 最高原則**：開發過程中須防範專屬安全威脅（如 Prompt Injection），參考 [OWASP Top 10 for LLM](https://owasp.org)。
+- **修復方式條件**：修復的答案必須是一個讓你（AI 或是其他 reviewer）再次 review 一定要會過的具體修復程式碼或步驟，而不是一個抽象的答案，或是基礎的答案。
 
 ## Gemini 掃描報告
 ${geminiReport}
@@ -52,9 +53,8 @@ ${errorsJson}
 - **嚴重程度**：1～10（1 為不嚴重，10 為最嚴重）
 - **是否必須修復**：是 / 否
 - **修復方式條件**：
-  - 使用 Gemini 的建議
+  - 使用 Gemini 具體修復程式碼或步驟
   - 或是提出更好解法（你們之間沒有競爭關係，是合作關係，如果 Gemini 的解法不夠好，你可以提出更好解法，如果 Gemini 的做法已經夠了，就使用 Gemini 的做法）
-  - 必須是一個讓你（AI 或是其他 reviewer）再次 review 一定要會過的具體修復程式碼或步驟
 
 ## 分數
 請在報告最後給一個整體 **1～10 分** 的嚴重程度分數（1 為不嚴重，10 為最嚴重）。格式為：\`分數：N\`（N 為 1～10 的整數）。
