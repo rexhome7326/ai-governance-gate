@@ -33,127 +33,60 @@ jobs:
       SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
     steps:
-      - name: Get inputs
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse Slack Inputs
         id: inputs
-        run: |
-          ACTION="${{ github.event.inputs.action }}"
-          UUID="${{ github.event.inputs.uuid }}"
-          BRANCH="${{ github.event.inputs.branch }}"
-          PR_NUMBER="${{ github.event.inputs.pr_number }}"
-          SLACK_USER_ID="${{ github.event.inputs.slack_user_id }}"
-          SLACK_USER_ID="${SLACK_USER_ID:-}"
-          [[ -n "$SLACK_USER_ID" && "$SLACK_USER_ID" != @* ]] && SLACK_USER_ID="@$SLACK_USER_ID"
-          echo "action=$ACTION" >> $GITHUB_OUTPUT
-          echo "uuid=$UUID" >> $GITHUB_OUTPUT
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
-          echo "slack_user_id=$SLACK_USER_ID" >> $GITHUB_OUTPUT
+        uses: ./.github/actions/parse-slack-inputs
+        with:
+          uuid: ${{ github.event.inputs.uuid }}
+          pr_number: ${{ github.event.inputs.pr_number }}
+          branch: ${{ github.event.inputs.branch }}
+          action: ${{ github.event.inputs.action }}
+          slack_user_id: ${{ github.event.inputs.slack_user_id }}
+          original_blocks_base64: ${{ github.event.inputs.original_blocks_base64 }}
 
-      - name: Decode Slack payload
-        env:
-          ORIGINAL_BLOCKS_B64: ${{ github.event.inputs.original_blocks_base64 }}
-        run: |
-          echo "$ORIGINAL_BLOCKS_B64" | base64 -d > original_blocks.json
-
-      - name: Log inputs
-        env:
-          UUID: ${{ steps.inputs.outputs.uuid }}
-          PR_NUMBER: ${{ steps.inputs.outputs.pr_number }}
-          BRANCH: ${{ steps.inputs.outputs.branch }}
-          SLACK_USER_ID: ${{ steps.inputs.outputs.slack_user_id }}
-        run: |
-          echo "Action: ${{ steps.inputs.outputs.action }}"
-          echo "UUID: $UUID"
-          echo "BRANCH: $BRANCH"
-          echo "PR number: $PR_NUMBER"
-          echo "SLACK_USER_ID: $SLACK_USER_ID"
-
-      - name: Check PR state
+      - name: Check PR State
         id: check_pr
-        env:
-          PR_NUMBER: ${{ steps.inputs.outputs.pr_number }}
-        run: |
-          STATE=$(curl -s -H "Authorization: token ${{ github.token }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER" | jq -r '.state // "unknown"')
-          echo "state=$STATE" >> $GITHUB_OUTPUT
-          if [ "$STATE" = "closed" ]; then
-            echo "alreadyClosed=true" >> $GITHUB_OUTPUT
-          else
-            echo "alreadyClosed=false" >> $GITHUB_OUTPUT
-          fi
+        uses: ./.github/actions/check-pr-state
+        with:
+          pr_number: ${{ steps.inputs.outputs.pr_number }}
+          github_token: ${{ github.token }}
+          repo: ${{ github.repository }}
 
       - name: Upload File To S3
-        if: steps.check_pr.outputs.alreadyClosed != 'true'
+        if: steps.check_pr.outputs.already_closed != 'true'
         id: upload
         run: |
           UPLOADED_URL="https://s.yimg.com/br/yahoo-tw-media/game-center/staging/home/index.html"
           echo "url=$UPLOADED_URL" >> $GITHUB_OUTPUT
 
       - name: Update Sheet (USER_UPLOADED)
-        if: steps.check_pr.outputs.alreadyClosed != 'true' && steps.upload.outputs.url != ''
-        env:
-          UUID: ${{ steps.inputs.outputs.uuid }}
-          UPLOAD_URL: ${{ steps.upload.outputs.url }}
-        run: |
-          CURRENT_TIME=$(node -e "console.log(new Date().toISOString())")
-          BODY="{
-            \"token\": \"$SHEET_API_TOKEN\",
-            \"action\": \"update\",
-            \"uuid\": \"$UUID\",
-            \"patch\": {
-              \"2\": \"${CURRENT_TIME}\",
-              \"7\": \"USER_UPLOADED\",
-              \"16\": \"$UPLOAD_URL\"
-            }
-          }"
-          curl -s -X POST "$SHEET_API_URL" \
-            -H "Content-Type: application/json" \
-            -d "$BODY"
+        if: steps.check_pr.outputs.already_closed != 'true' && steps.upload.outputs.url != ''
+        uses: ./.github/actions/update-sheet
+        with:
+          uuid: ${{ steps.inputs.outputs.uuid }}
+          patch_json: '{"7":"USER_UPLOADED","16":"${{ steps.upload.outputs.url }}"}'
+          sheet_api_url: ${{ secrets.SHEET_API_URL }}
+          sheet_api_token: ${{ secrets.SHEET_API_TOKEN }}
 
       - name: Close PR
-        if: steps.check_pr.outputs.alreadyClosed != 'true'
+        if: steps.check_pr.outputs.already_closed != 'true' && steps.upload.outputs.url != ''
         id: close_pr
-        env:
-          UPLOAD_URL: ${{ steps.upload.outputs.url }}
-          PR_NUMBER: ${{ steps.inputs.outputs.pr_number }}
         continue-on-error: true
-        run: |
-          if [ -z "$UPLOAD_URL" ]; then
-            echo "success=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/pr_response.json -X PATCH \
-            -H "Authorization: token ${{ github.token }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/pulls/$PR_NUMBER \
-            -d '{"state":"closed"}')
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "success=true" >> $GITHUB_OUTPUT
-          else
-            echo "success=false" >> $GITHUB_OUTPUT
-          fi
+        uses: ./.github/actions/close-pr
+        with:
+          pr_number: ${{ steps.inputs.outputs.pr_number }}
+          github_token: ${{ github.token }}
+          repo: ${{ github.repository }}
 
-      - name: Notify Slack Upload Success
-        if: steps.check_pr.outputs.alreadyClosed != 'true' && steps.close_pr.outputs.success == 'true'
-        env:
-          RESPONSE_URL: ${{ github.event.inputs.response_url }}
-          ATTACHMENT_COLOR: ${{ github.event.inputs.attachment_color }}
-          UPLOAD_URL: ${{ steps.upload.outputs.url }}
-        run: |
-          SUCCESS_BLOCKS=$(jq -c --arg url "$UPLOAD_URL" '(.[0:3] + [{type: "section", text: {type: "mrkdwn", text: (":white_check_mark: 已上傳檔案\n<" + $url + "|開啟連結>")}}])' original_blocks.json)
-          BODY=$(jq -n -c --arg color "$ATTACHMENT_COLOR" --argjson blocks "$SUCCESS_BLOCKS" '{replace_original: true, attachments: [{color: $color, blocks: $blocks}]}')
-          curl -s -X POST "$RESPONSE_URL" -H "Content-Type: application/json" -d "$BODY"
-
-      - name: Notify Slack Upload Failed
-        if: steps.check_pr.outputs.alreadyClosed != 'true' && steps.close_pr.outputs.success != 'true'
-        env:
-          RESPONSE_URL: ${{ github.event.inputs.response_url }}
-          ATTACHMENT_COLOR: ${{ github.event.inputs.attachment_color }}
-        run: |
-          FAIL_BLOCKS=$(jq -c '(.[0:3] + [{type: "section", text: {type: "mrkdwn", text: ":x: 上傳失敗，請再重新按一次"}}])' original_blocks.json)
-          BODY=$(jq -n -c --arg color "$ATTACHMENT_COLOR" --argjson blocks "$FAIL_BLOCKS" '{replace_original: true, attachments: [{color: $color, blocks: $blocks}]}')
-          curl -s -X POST "$RESPONSE_URL" -H "Content-Type: application/json" -d "$BODY"
-          sleep 3
-          RESTORE_BODY=$(jq -n -c --arg color "$ATTACHMENT_COLOR" --slurpfile blocks original_blocks.json '{replace_original: true, attachments: [{color: $color, blocks: $blocks[0]}]}')
-          curl -s -X POST "$RESPONSE_URL" -H "Content-Type: application/json" -d "$RESTORE_BODY"
+      - name: Notify Slack
+        if: steps.check_pr.outputs.already_closed != 'true'
+        uses: ./.github/actions/slack-respond
+        with:
+          response_url: ${{ github.event.inputs.response_url }}
+          attachment_color: ${{ github.event.inputs.attachment_color }}
+          is_success: ${{ steps.close_pr.outputs.success }}
+          success_text: ':white_check_mark: 已上傳檔案\n<${{ steps.upload.outputs.url }}|開啟連結>'
+          fail_text: ':x: 上傳失敗，請再重新按一次'

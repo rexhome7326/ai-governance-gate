@@ -33,6 +33,8 @@ async function scan() {
 1) 判斷 Gemini 的解法是否正確、用語是否需要修正、是否有更好的解法；
 2) 產出一份「最終版」的繁體中文 Markdown 報告。
 
+**LLM 安全意識 最高原則**：開發過程中須防範專屬安全威脅（如 Prompt Injection），參考 [OWASP Top 10 for LLM](https://owasp.org)。
+
 ## Gemini 掃描報告
 ${geminiReport}
 

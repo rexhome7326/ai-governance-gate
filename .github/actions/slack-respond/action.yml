@@ -1,0 +1,52 @@
+name: Slack Respond
+description: Respond to Slack interaction via response_url (success replaces blocks, failure replaces then restores)
+
+inputs:
+  response_url:
+    description: 'Slack response_url from the interaction payload'
+    required: true
+  attachment_color:
+    description: 'Color for the Slack attachment sidebar'
+    required: true
+  is_success:
+    description: 'Whether the operation succeeded (true/false)'
+    required: true
+  success_text:
+    description: 'mrkdwn text for success case'
+    required: false
+    default: ''
+  fail_text:
+    description: 'mrkdwn text for failure case'
+    required: false
+    default: ''
+  original_blocks_path:
+    description: 'Path to the original Slack blocks JSON file'
+    required: false
+    default: 'original_blocks.json'
+
+runs:
+  using: composite
+  steps:
+    - name: Respond to Slack
+      shell: bash
+      run: |
+        if [ "${{ inputs.is_success }}" = "true" ]; then
+          BLOCKS=$(jq -c --arg text "${{ inputs.success_text }}" \
+            '(.[0:3] + [{type: "section", text: {type: "mrkdwn", text: $text}}])' \
+            "${{ inputs.original_blocks_path }}")
+          BODY=$(jq -n -c --arg color "${{ inputs.attachment_color }}" --argjson blocks "$BLOCKS" \
+            '{replace_original: true, attachments: [{color: $color, blocks: $blocks}]}')
+          curl -s -X POST "${{ inputs.response_url }}" -H "Content-Type: application/json" -d "$BODY"
+        else
+          BLOCKS=$(jq -c --arg text "${{ inputs.fail_text }}" \
+            '(.[0:3] + [{type: "section", text: {type: "mrkdwn", text: $text}}])' \
+            "${{ inputs.original_blocks_path }}")
+          BODY=$(jq -n -c --arg color "${{ inputs.attachment_color }}" --argjson blocks "$BLOCKS" \
+            '{replace_original: true, attachments: [{color: $color, blocks: $blocks}]}')
+          curl -s -X POST "${{ inputs.response_url }}" -H "Content-Type: application/json" -d "$BODY"
+          sleep 3
+          RESTORE_BODY=$(jq -n -c --arg color "${{ inputs.attachment_color }}" \
+            --slurpfile blocks "${{ inputs.original_blocks_path }}" \
+            '{replace_original: true, attachments: [{color: $color, blocks: $blocks[0]}]}')
+          curl -s -X POST "${{ inputs.response_url }}" -H "Content-Type: application/json" -d "$RESTORE_BODY"
+        fi

@@ -1,0 +1,123 @@
+name: Run Security Scans
+description: Run CodeQL, Semgrep, Gemini, and OpenAI security scans with scoring
+
+inputs:
+  scan_dir:
+    description: 'Directory containing source files to scan'
+    required: true
+  gemini_api_key:
+    description: 'API key for Google Gemini'
+    required: true
+  openai_api_key:
+    description: 'API key for OpenAI'
+    required: true
+  file_name:
+    description: 'Original uploaded file name (for report naming)'
+    required: true
+
+outputs:
+  codeql:
+    description: 'CodeQL scan score'
+    value: ${{ steps.export.outputs.codeql }}
+  semgrep:
+    description: 'Semgrep scan score'
+    value: ${{ steps.export.outputs.semgrep }}
+  gemini:
+    description: 'Gemini AI scan score'
+    value: ${{ steps.export.outputs.gemini }}
+  openai:
+    description: 'OpenAI scan score'
+    value: ${{ steps.export.outputs.openai }}
+  avg:
+    description: 'Weighted average score'
+    value: ${{ steps.export.outputs.avg }}
+  verdict:
+    description: 'Final verdict (e.g. S3 PASS, S0 FAIL)'
+    value: ${{ steps.export.outputs.verdict }}
+  total:
+    description: 'Overall result (PASS/FAIL)'
+    value: ${{ steps.export.outputs.total }}
+  report_path:
+    description: 'Path to the generated report file'
+    value: ${{ steps.report.outputs.report_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Init CodeQL
+      uses: github/codeql-action/init@v4
+      with:
+        languages: javascript
+        source-root: ${{ inputs.scan_dir }}
+
+    - name: Run CodeQL
+      uses: github/codeql-action/analyze@v4
+      with:
+        output: reports
+
+    - name: Copy CodeQL SARIF
+      shell: bash
+      run: cp reports/javascript.sarif reports/codeql.sarif
+
+    - name: Install Semgrep
+      shell: bash
+      run: pip install semgrep
+
+    - name: Run Semgrep
+      shell: bash
+      run: |
+        semgrep scan ${{ inputs.scan_dir }} --config=.github/scripts/semgrep.yml --json > reports/semgrep.json
+
+    - name: Get codeql & semgrep error message
+      shell: bash
+      run: node .github/scripts/get_codeql_semgrep_errors.js
+
+    - name: Gemini Scan
+      shell: bash
+      env:
+        GEMINI_API_KEY: ${{ inputs.gemini_api_key }}
+        SCAN_DIR: ${{ inputs.scan_dir }}
+      run: node .github/scripts/gemini_scan.js
+
+    - name: OpenAI Scan
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+      run: node .github/scripts/openai_scan.js
+
+    - name: Score Results
+      shell: bash
+      run: node .github/scripts/score.js
+
+    - name: Export Score
+      id: export
+      shell: bash
+      run: |
+        CODEQL=$(jq -r .codeql reports/score.json)
+        SEMGREP=$(jq -r .semgrep reports/score.json)
+        GEMINI=$(jq -r .gemini reports/score.json)
+        OPENAI=$(jq -r .openai reports/score.json)
+        AVG=$(jq -r .avg reports/score.json)
+        VERDICT=$(jq -r .verdict reports/score.json)
+
+        echo "codeql=$CODEQL" >> $GITHUB_OUTPUT
+        echo "semgrep=$SEMGREP" >> $GITHUB_OUTPUT
+        echo "gemini=$GEMINI" >> $GITHUB_OUTPUT
+        echo "openai=$OPENAI" >> $GITHUB_OUTPUT
+        echo "avg=$AVG" >> $GITHUB_OUTPUT
+        echo "verdict=$VERDICT" >> $GITHUB_OUTPUT
+
+        if [[ "$VERDICT" == *"PASS"* ]]; then
+          echo "total=PASS" >> $GITHUB_OUTPUT
+        else
+          echo "total=FAIL" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build Report
+      id: report
+      shell: bash
+      env:
+        FILE_NAME: ${{ inputs.file_name }}
+      run: |
+        REPORT_PATH=$(node .github/scripts/build_report.js)
+        echo "report_path=$REPORT_PATH" >> $GITHUB_OUTPUT
