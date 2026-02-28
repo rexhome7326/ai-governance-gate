@@ -1,8 +1,10 @@
 import fs from 'fs';
+import {
+  SRC_DIR, REPORTS_DIR, checklist,
+  collectCode, writeEmptyReport, writeReport, fetchWithRetry
+} from './utils.js';
 
-const fetch = global.fetch;
 const API_KEY = process.env.OPENAI_API_KEY;
-const REPORTS_DIR = 'reports';
 
 async function scan() {
   if (!API_KEY) {
@@ -13,34 +15,35 @@ async function scan() {
   const errorsPath = `${REPORTS_DIR}/codeql_semgrep_errors.json`;
 
   if (!fs.existsSync(geminiPath) || !fs.existsSync(errorsPath)) {
-    fs.mkdirSync(REPORTS_DIR, { recursive: true });
-    fs.writeFileSync(
-      `${REPORTS_DIR}/openai_report.md`,
-      '# OpenAI Scan\n\n缺少 Gemini 報告或 CodeQL/Semgrep 錯誤資料。'
-    );
-    fs.writeFileSync(
-      `${REPORTS_DIR}/openai.json`,
-      JSON.stringify({ engine: 'openai', score_hint: 0, summary: '無輸入' }, null, 2)
-    );
+    writeEmptyReport('openai', '缺少 Gemini 報告或 CodeQL/Semgrep 錯誤資料。');
     return;
   }
 
   const geminiReport = fs.readFileSync(geminiPath, 'utf8');
   const errorsJson = fs.readFileSync(errorsPath, 'utf8');
+  const code = collectCode(SRC_DIR);
 
   const prompt = `
 你是一位應用程式安全審查員。請根據「Gemini 的掃描建議報告」以及「CodeQL & Semgrep 的原始錯誤清單」，做兩件事：
 1) 判斷 Gemini 的解法是否正確、用語是否需要修正、是否有更好的解法；
 2) 產出一份「最終版」的繁體中文 Markdown 報告。
 
+## 最高原則：
+- 這是份一頁式的網頁，包含 html, inline css, inline js，不需要獨立拉出 css 跟 js 的 file。
 - **LLM 安全意識 最高原則**：開發過程中須防範專屬安全威脅（如 Prompt Injection），參考 [OWASP Top 10 for LLM](https://owasp.org)。
 - **修復方式條件**：修復的答案必須是一個讓你（AI 或是其他 reviewer）再次 review 一定要會過的具體修復程式碼或步驟，而不是一個抽象的答案，或是基礎的答案。
+
+## 檢查規則
+${checklist}
 
 ## Gemini 掃描報告
 ${geminiReport}
 
-## CodeQL & Semgrep 錯誤（JSON）
+## 輸入：CodeQL & Semgrep 錯誤（JSON）
 ${errorsJson}
+
+## 輸入：原始碼
+${code}
 
 ## 輸出要求
 請「只」回傳一份 Markdown，結構如下（全部使用繁體中文）：
@@ -61,15 +64,11 @@ ${errorsJson}
 ---
 `;
 
-console.log(prompt);
+  console.log(prompt);
 
-  const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY_MS = 5000;
-
-  let data;
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(OPENAI_URL, {
+  const data = await fetchWithRetry(
+    'https://api.openai.com/v1/chat/completions',
+    {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${API_KEY}`,
@@ -87,53 +86,14 @@ console.log(prompt);
         ],
         temperature: 0.2
       })
-    });
-    data = await res.json();
-
-    const non2xx = res.status < 200 || res.status >= 300;
-    if (non2xx && attempt < MAX_RETRIES) {
-      console.warn(
-        `OpenAI HTTP ${res.status} (attempt ${attempt}/${MAX_RETRIES}), retry in ${RETRY_DELAY_MS / 1000}s...`
-      );
-      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-      continue;
-    }
-    if (data?.error || non2xx) {
-      throw new Error(
-        data?.error?.message || `HTTP ${res.status}` || JSON.stringify(data?.error)
-      );
-    }
-    break;
-  }
+    },
+    { label: 'OpenAI' }
+  );
 
   console.log(data);
-  let rawMd = data.choices?.[0]?.message?.content?.trim() || '# OpenAI Scan\n\n無產出。';
+  const rawMd = data.choices?.[0]?.message?.content?.trim() || '# OpenAI Scan\n\n無產出。';
 
-  rawMd = rawMd
-    .replace(/^```(?:markdown|md)?\s*\n?/i, '')
-    .replace(/\n?```\s*$/i, '')
-    .trim();
-
-  const scoreMatch = rawMd.match(/分數[：:]\s*(\d+)/);
-  const scoreHint = scoreMatch ? Math.min(10, Math.max(1, parseInt(scoreMatch[1], 10))) : 5;
-
-  fs.mkdirSync(REPORTS_DIR, { recursive: true });
-  fs.writeFileSync(`${REPORTS_DIR}/openai_report.md`, rawMd);
-  fs.writeFileSync(
-    `${REPORTS_DIR}/openai.json`,
-    JSON.stringify(
-      {
-        engine: 'openai',
-        summary: '依 Gemini 報告與 CodeQL/Semgrep 錯誤產出的最終建議',
-        severity: scoreHint >= 7 ? 'high' : scoreHint >= 4 ? 'medium' : 'low',
-        score_hint: scoreHint,
-        details: []
-      },
-      null,
-      2
-    )
-  );
-  console.log('OpenAI report and score written.');
+  writeReport('openai', rawMd, '依 Gemini 報告與 CodeQL/Semgrep 錯誤產出的最終建議');
 }
 
 scan().catch((err) => {
