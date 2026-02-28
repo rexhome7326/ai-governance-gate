@@ -1,35 +1,15 @@
 import fs from 'fs';
+import {
+  SRC_DIR, REPORTS_DIR, checklist,
+  collectCode, writeEmptyReport, writeReport, fetchWithRetry
+} from './utils.js';
 
-const fetch = global.fetch;
 const API_KEY = process.env.GEMINI_API_KEY;
-const SRC_DIR = process.env.SCAN_DIR || 'src';
-const REPORTS_DIR = 'reports';
-
-function collectCode(dir) {
-  let output = '';
-  for (const f of fs.readdirSync(dir)) {
-    const p = `${dir}/${f}`;
-    if (fs.statSync(p).isDirectory()) {
-      output += collectCode(p);
-    } else if (f.match(/\.(js|ts|html|css|json)$/)) {
-      output += `\n\n### ${p}\n` + fs.readFileSync(p, 'utf8');
-    }
-  }
-  return output;
-}
 
 async function scan() {
   const errorsPath = `${REPORTS_DIR}/codeql_semgrep_errors.json`;
   if (!fs.existsSync(errorsPath)) {
-    fs.mkdirSync(REPORTS_DIR, { recursive: true });
-    fs.writeFileSync(
-      `${REPORTS_DIR}/gemini_report.md`,
-      '# Gemini Scan\n\n無 CodeQL/Semgrep 錯誤資料。'
-    );
-    fs.writeFileSync(
-      `${REPORTS_DIR}/gemini.json`,
-      JSON.stringify({ engine: 'gemini', score_hint: 0, summary: '無輸入' }, null, 2)
-    );
+    writeEmptyReport('gemini', '無 CodeQL/Semgrep 錯誤資料。');
     return;
   }
 
@@ -39,9 +19,13 @@ async function scan() {
   const prompt = `
 你是一位應用程式安全審查員。請根據以下「CodeQL 與 Semgrep 的錯誤清單」以及「原始碼內容」，產出一份「中文」的掃描建議報告。
 
-最高原則：
+## 最高原則：
+- 這是份一頁式的網頁，包含 html, inline css, inline js，不需要獨立拉出 css 跟 js 的 file。
 - **LLM 安全意識 最高原則**：開發過程中須防範專屬安全威脅（如 Prompt Injection），參考 [OWASP Top 10 for LLM](https://owasp.org)。
 - **修復方式條件**：修復的答案必須是一個讓你（AI 或是其他 reviewer）再次 review 一定要會過的具體修復程式碼或步驟，而不是一個抽象的答案，或是基礎的答案。
+
+## 檢查規則
+${checklist}
 
 ## 輸入：CodeQL & Semgrep 錯誤（JSON）
 ${JSON.stringify(errorsJson, null, 2)}
@@ -66,71 +50,28 @@ ${code}
 ---
 `;
 
-console.log(prompt);
+  console.log(prompt);
 
   const GEMINI_URL =
     'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent';
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY_MS = 5000;
 
-  let data;
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(GEMINI_URL, {
+  const data = await fetchWithRetry(
+    GEMINI_URL,
+    {
       method: 'POST',
-      headers: {
-        'x-goog-api-key': API_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
-      })
-    });
-    data = await res.json();
-
-    const non2xx = res.status < 200 || res.status >= 300;
-    if (non2xx && attempt < MAX_RETRIES) {
-      console.warn(
-        `Gemini HTTP ${res.status} (attempt ${attempt}/${MAX_RETRIES}), retry in ${RETRY_DELAY_MS / 1000}s...`
-      );
-      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
-      continue;
-    }
-    if (data?.error || non2xx) {
-      throw new Error(data?.error?.message || `HTTP ${res.status}` || JSON.stringify(data?.error));
-    }
-    break;
-  }
+      headers: { 'x-goog-api-key': API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    },
+    { label: 'Gemini' }
+  );
 
   console.log(data);
-  let rawMd =
+  const rawMd =
     data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
     '# Gemini Scan\n\n無產出。';
   console.log(rawMd);
-  rawMd = rawMd
-    .replace(/^```(?:markdown|md)?\s*\n?/i, '')
-    .replace(/\n?```\s*$/i, '')
-    .trim();
 
-  const scoreMatch = rawMd.match(/分數[：:]\s*(\d+)/);
-  const scoreHint = scoreMatch ? Math.min(10, Math.max(1, parseInt(scoreMatch[1], 10))) : 5;
-
-  fs.mkdirSync(REPORTS_DIR, { recursive: true });
-  fs.writeFileSync(`${REPORTS_DIR}/gemini_report.md`, rawMd);
-  fs.writeFileSync(
-    `${REPORTS_DIR}/gemini.json`,
-    JSON.stringify(
-      {
-        engine: 'gemini',
-        summary: '由 CodeQL/Semgrep 錯誤與原始碼產出的中文建議',
-        severity: scoreHint >= 7 ? 'high' : scoreHint >= 4 ? 'medium' : 'low',
-        score_hint: scoreHint,
-        details: []
-      },
-      null,
-      2
-    )
-  );
-  console.log('Gemini report and score written.');
+  writeReport('gemini', rawMd, '由 CodeQL/Semgrep 錯誤與原始碼產出的中文建議');
 }
 
 scan().catch((err) => {
