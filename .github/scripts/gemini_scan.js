@@ -39,6 +39,9 @@ async function scan() {
   const prompt = `
 你是一位應用程式安全審查員。請根據以下「CodeQL 與 Semgrep 的錯誤清單」以及「原始碼內容」，產出一份「中文」的掃描建議報告。
 
+最高原則：
+**LLM 安全意識 最高原則**：開發過程中須防範專屬安全威脅（如 Prompt Injection），參考 [OWASP Top 10 for LLM](https://owasp.org)。
+
 ## 輸入：CodeQL & Semgrep 錯誤（JSON）
 ${JSON.stringify(errorsJson, null, 2)}
 

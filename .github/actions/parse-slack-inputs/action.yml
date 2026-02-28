@@ -1,0 +1,73 @@
+name: Parse Slack Inputs
+description: Parse and normalize workflow_dispatch inputs from Slack interaction
+
+inputs:
+  uuid:
+    description: 'Unique identifier for the review'
+    required: true
+  pr_number:
+    description: 'Pull request number'
+    required: true
+  branch:
+    description: 'Branch name'
+    required: true
+  action:
+    description: 'Slack action type'
+    required: true
+  slack_user_id:
+    description: 'Slack user ID'
+    required: true
+  original_blocks_base64:
+    description: 'Base64-encoded original Slack blocks JSON'
+    required: true
+
+outputs:
+  uuid:
+    description: 'Parsed UUID'
+    value: ${{ steps.parse.outputs.uuid }}
+  pr_number:
+    description: 'Parsed PR number'
+    value: ${{ steps.parse.outputs.pr_number }}
+  branch:
+    description: 'Parsed branch name'
+    value: ${{ steps.parse.outputs.branch }}
+  action:
+    description: 'Parsed action type'
+    value: ${{ steps.parse.outputs.action }}
+  slack_user_id:
+    description: 'Normalized Slack user ID (prefixed with @)'
+    value: ${{ steps.parse.outputs.slack_user_id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Parse and normalize inputs
+      id: parse
+      shell: bash
+      run: |
+        ACTION="${{ inputs.action }}"
+        UUID="${{ inputs.uuid }}"
+        BRANCH="${{ inputs.branch }}"
+        PR_NUMBER="${{ inputs.pr_number }}"
+        SLACK_USER_ID="${{ inputs.slack_user_id }}"
+        SLACK_USER_ID="${SLACK_USER_ID:-}"
+        [[ -n "$SLACK_USER_ID" && "$SLACK_USER_ID" != @* ]] && SLACK_USER_ID="@$SLACK_USER_ID"
+        echo "action=$ACTION" >> $GITHUB_OUTPUT
+        echo "uuid=$UUID" >> $GITHUB_OUTPUT
+        echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+        echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+        echo "slack_user_id=$SLACK_USER_ID" >> $GITHUB_OUTPUT
+
+    - name: Decode Slack payload
+      shell: bash
+      run: |
+        echo "${{ inputs.original_blocks_base64 }}" | base64 -d > original_blocks.json
+
+    - name: Log inputs
+      shell: bash
+      run: |
+        echo "Action: ${{ steps.parse.outputs.action }}"
+        echo "UUID: ${{ steps.parse.outputs.uuid }}"
+        echo "BRANCH: ${{ steps.parse.outputs.branch }}"
+        echo "PR number: ${{ steps.parse.outputs.pr_number }}"
+        echo "SLACK_USER_ID: ${{ steps.parse.outputs.slack_user_id }}"

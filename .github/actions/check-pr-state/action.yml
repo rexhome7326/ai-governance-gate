@@ -1,0 +1,38 @@
+name: Check PR State
+description: Check if a pull request is open or closed
+
+inputs:
+  pr_number:
+    description: 'Pull request number to check'
+    required: true
+  github_token:
+    description: 'GitHub token for API authentication'
+    required: true
+  repo:
+    description: 'Repository in owner/repo format'
+    required: true
+
+outputs:
+  state:
+    description: 'Current PR state (open/closed/unknown)'
+    value: ${{ steps.check.outputs.state }}
+  already_closed:
+    description: 'Whether the PR is already closed (true/false)'
+    value: ${{ steps.check.outputs.already_closed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check PR state
+      id: check
+      shell: bash
+      run: |
+        STATE=$(curl -s -H "Authorization: token ${{ inputs.github_token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          "https://api.github.com/repos/${{ inputs.repo }}/pulls/${{ inputs.pr_number }}" | jq -r '.state // "unknown"')
+        echo "state=$STATE" >> $GITHUB_OUTPUT
+        if [ "$STATE" = "closed" ]; then
+          echo "already_closed=true" >> $GITHUB_OUTPUT
+        else
+          echo "already_closed=false" >> $GITHUB_OUTPUT
+        fi

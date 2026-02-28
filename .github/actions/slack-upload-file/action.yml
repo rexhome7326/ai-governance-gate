@@ -1,0 +1,67 @@
+name: Slack Upload File
+description: Upload a file to a Slack thread via files.getUploadURLExternal API
+
+inputs:
+  slack_bot_token:
+    description: 'Slack Bot OAuth token'
+    required: true
+  file_path:
+    description: 'Path to the file to upload'
+    required: true
+  channel_id:
+    description: 'Slack channel ID for the upload'
+    required: true
+  thread_ts:
+    description: 'Slack thread timestamp to attach the file to'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Upload file to Slack thread
+      shell: bash
+      env:
+        SLACK_BOT_TOKEN: ${{ inputs.slack_bot_token }}
+        CHANNEL_ID: ${{ inputs.channel_id }}
+        THREAD_TS: ${{ inputs.thread_ts }}
+      run: |
+        FILE="${{ inputs.file_path }}"
+        [ -z "$FILE" ] || [ ! -f "$FILE" ] && { echo "No report file to upload."; exit 0; }
+
+        echo "Uploading $FILE"
+        FILE_SIZE=$(wc -c < "$FILE")
+        FILE_NAME=$(basename "$FILE")
+
+        echo "=== get upload URL ==="
+        echo "FILE_NAME=$FILE_NAME FILE_SIZE=$FILE_SIZE"
+        RESPONSE=$(curl -s -S -X POST https://slack.com/api/files.getUploadURLExternal \
+          -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          --data-urlencode "filename=$FILE_NAME" \
+          --data-urlencode "length=$FILE_SIZE")
+        echo "getUploadURLExternal response: $RESPONSE"
+
+        UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url // empty')
+        FILE_ID=$(echo "$RESPONSE" | jq -r '.file_id // empty')
+
+        if [ -z "$UPLOAD_URL" ] || [ -z "$FILE_ID" ]; then
+          echo "Error: getUploadURLExternal failed: $RESPONSE"
+          exit 1
+        fi
+
+        echo "=== upload binary ==="
+        echo "UPLOAD_URL=$UPLOAD_URL FILE=$FILE"
+        RESPONSE_PUT=$(curl -s -f -X POST "$UPLOAD_URL" \
+          -H "Content-Type: application/octet-stream" \
+          --data-binary @"$FILE")
+        echo "POST response: $RESPONSE_PUT"
+
+        echo "=== to thread ==="
+        echo "FILE_ID=$FILE_ID FILE_NAME=$FILE_NAME CHANNEL_ID=$CHANNEL_ID THREAD_TS=$THREAD_TS"
+        RESPONSE_COMPLETE=$(curl -s -S -X POST https://slack.com/api/files.completeUploadExternal \
+          -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+          -H "Content-Type: application/x-www-form-urlencoded" \
+          --data-urlencode "files=[{\"id\":\"$FILE_ID\",\"title\":\"$FILE_NAME\"}]" \
+          --data-urlencode "channel_id=$CHANNEL_ID" \
+          --data-urlencode "thread_ts=$THREAD_TS")
+        echo "completeUploadExternal response: $RESPONSE_COMPLETE"

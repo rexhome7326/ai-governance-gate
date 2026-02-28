@@ -1,0 +1,36 @@
+name: Close PR
+description: Close a pull request via GitHub API
+
+inputs:
+  pr_number:
+    description: 'Pull request number to close'
+    required: true
+  github_token:
+    description: 'GitHub token for API authentication'
+    required: true
+  repo:
+    description: 'Repository in owner/repo format'
+    required: true
+
+outputs:
+  success:
+    description: 'Whether the PR was closed successfully (true/false)'
+    value: ${{ steps.close.outputs.success }}
+
+runs:
+  using: composite
+  steps:
+    - name: Close PR
+      id: close
+      shell: bash
+      run: |
+        HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/pr_response.json -X PATCH \
+          -H "Authorization: token ${{ inputs.github_token }}" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/${{ inputs.repo }}/pulls/${{ inputs.pr_number }} \
+          -d '{"state":"closed"}')
+        if [ "$HTTP_CODE" = "200" ]; then
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "success=false" >> $GITHUB_OUTPUT
+        fi

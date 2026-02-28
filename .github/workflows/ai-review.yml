@@ -16,11 +16,6 @@ jobs:
       LANG: en_US.UTF-8
       LC_ALL: en_US.UTF-8
       SCAN_DIR: src
-      SHEET_API_URL: ${{ secrets.SHEET_API_URL }}
-      SHEET_API_TOKEN: ${{ secrets.SHEET_API_TOKEN }}
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
     steps:
       - name: Checkout
@@ -59,7 +54,6 @@ jobs:
           mkdir -p ${{ env.SCAN_DIR }} reports
           for z in $(ls scan-targets/*.zip 2>/dev/null | head -n 10); do
             echo "Unzipping $z"
-            # -O CP950：ZIP 內檔名為 Windows 繁體中文 (Big5)，解壓時轉成 UTF-8，避免亂碼
             unzip -O CP950 -o "$z" -d ${{ env.SCAN_DIR }} || unzip -o "$z" -d ${{ env.SCAN_DIR }}
           done
 
@@ -82,7 +76,6 @@ jobs:
           RUN_SCANS=false
           [ "$HAS_FILES" = true ] && [ -n "$UUID" ] && RUN_SCANS=true
 
-          # 用 delimiter 寫入，避免檔名含空格、括號、中文時被截斷
           echo "file_name<<ENDFILENAME" >> $GITHUB_OUTPUT
           echo "${FILE_NAME:-}" >> $GITHUB_OUTPUT
           echo "ENDFILENAME" >> $GITHUB_OUTPUT
@@ -90,105 +83,17 @@ jobs:
           echo "run_scans=$RUN_SCANS" >> $GITHUB_OUTPUT
 
       # --------------------
-      # CodeQL
+      # Security Scans + Score + Report
       # --------------------
-      - name: Init CodeQL
+      - name: Run Security Scans
+        id: scans
         if: steps.check_source.outputs.run_scans == 'true'
-        uses: github/codeql-action/init@v4
+        uses: ./.github/actions/run-security-scans
         with:
-          languages: javascript
-          source-root: ${{ env.SCAN_DIR }}
-
-      - name: Run CodeQL
-        if: steps.check_source.outputs.run_scans == 'true'
-        uses: github/codeql-action/analyze@v4
-        with:
-          output: reports
-
-      - name: Copy CodeQL SARIF
-        if: steps.check_source.outputs.run_scans == 'true'
-        run: cp reports/javascript.sarif reports/codeql.sarif
-
-      # --------------------
-      # Install Semgrep
-      # --------------------
-      - name: Install Semgrep
-        if: steps.check_source.outputs.run_scans == 'true'
-        run: pip install semgrep
-
-      # --------------------
-      # Semgrep
-      # --------------------
-      - name: Run Semgrep
-        if: steps.check_source.outputs.run_scans == 'true'
-        run: |
-          semgrep scan src --config=.github/scripts/semgrep.yml --json > reports/semgrep.json
-
-      # --------------------
-      # Get codeql & semgrep error message
-      # --------------------
-      - name: Get codeql & semgrep error message
-        if: steps.check_source.outputs.run_scans == 'true'
-        run: node .github/scripts/get_codeql_semgrep_errors.js
-
-      # --------------------
-      # Gemini AI Scan
-      # --------------------
-      - name: Gemini Scan
-        if: steps.check_source.outputs.run_scans == 'true'
-        run: node .github/scripts/gemini_scan.js
-
-      # --------------------
-      # OpenAI Scan (optional)
-      # --------------------
-      - name: OpenAI Scan
-        if: steps.check_source.outputs.run_scans == 'true'
-        run: node .github/scripts/openai_scan.js
-
-      # --------------------
-      # Score Results
-      # --------------------
-      - name: Score Results
-        if: steps.check_source.outputs.run_scans == 'true'
-        run: node .github/scripts/score.js
-
-      # --------------------
-      # Export Score to env
-      # --------------------
-      - name: Export Score
-        if: steps.check_source.outputs.run_scans == 'true'
-        run: |
-          CODEQL=$(jq -r .codeql reports/score.json)
-          SEMGREP=$(jq -r .semgrep reports/score.json)
-          GEMINI=$(jq -r .gemini reports/score.json)
-          OPENAI=$(jq -r .openai reports/score.json)
-          AVG=$(jq -r .avg reports/score.json)
-          VERDICT=$(jq -r .verdict reports/score.json)
-
-          echo "CODEQL=$CODEQL" >> $GITHUB_ENV
-          echo "SEMGREP=$SEMGREP" >> $GITHUB_ENV
-          echo "GEMINI=$GEMINI" >> $GITHUB_ENV
-          echo "OPENAI=$OPENAI" >> $GITHUB_ENV
-          echo "AVG=$AVG" >> $GITHUB_ENV
-          echo "VERDICT=$VERDICT" >> $GITHUB_ENV
-
-          if [[ "$VERDICT" == *"PASS"* ]]; then
-            echo "TOTAL=PASS" >> $GITHUB_ENV
-          else
-            echo "TOTAL=FAIL" >> $GITHUB_ENV
-          fi
-
-      # --------------------
-      # Build Report
-      # --------------------
-      - name: Build Report
-        id: build_report
-        if: steps.check_source.outputs.run_scans == 'true'
-        env:
-          FILE_NAME: ${{ steps.check_source.outputs.file_name }}
-        run: |
-          REPORT_PATH=$(node .github/scripts/build_report.js)
-          echo "report_path=$REPORT_PATH" >> $GITHUB_OUTPUT
+          scan_dir: ${{ env.SCAN_DIR }}
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          file_name: ${{ steps.check_source.outputs.file_name }}
 
       # --------------------
       # Upload Report Artifact
@@ -202,209 +107,49 @@ jobs:
           path: reports/
 
       # --------------------
-      # Notify Sheet
+      # Update Sheet
       # --------------------
       - name: Update Sheet
         if: steps.check_source.outputs.run_scans == 'true'
-        env:
-          UUID: ${{ steps.pr_body.outputs.uuid }}
-          ARTIFACT_URL: ${{ steps.upload-report.outputs.artifact-url }}
-        run: |
-          CURRENT_TIME=$(node -e "console.log(new Date().toISOString())")
-          BODY="{
-            \"token\": \"$SHEET_API_TOKEN\",
-            \"action\": \"update\",
-            \"uuid\": \"$UUID\",
-            \"patch\": {
-              \"2\": \"${CURRENT_TIME}\",
-              \"7\": \"SCANNED\",
-              \"9\": \"${ARTIFACT_URL}\",
-              \"10\": \"${CODEQL}\",
-              \"11\": \"${SEMGREP}\",
-              \"12\": \"${GEMINI}\",
-              \"13\": \"${OPENAI}\",
-              \"14\": \"${AVG}\",
-              \"15\": \"${VERDICT}\"
-            }
-          }"
+        uses: ./.github/actions/update-sheet
+        with:
+          uuid: ${{ steps.pr_body.outputs.uuid }}
+          patch_json: '{"7":"SCANNED","9":"${{ steps.upload-report.outputs.artifact-url }}","10":"${{ steps.scans.outputs.codeql }}","11":"${{ steps.scans.outputs.semgrep }}","12":"${{ steps.scans.outputs.gemini }}","13":"${{ steps.scans.outputs.openai }}","14":"${{ steps.scans.outputs.avg }}","15":"${{ steps.scans.outputs.verdict }}"}'
+          sheet_api_url: ${{ secrets.SHEET_API_URL }}
+          sheet_api_token: ${{ secrets.SHEET_API_TOKEN }}
 
-          echo "=== curl 目標 ==="
-          echo "URL: $SHEET_API_URL"
-          echo "Method: POST"
-          echo ""
-          echo "=== Header ==="
-          echo "Content-Type: application/json"
-          echo ""
-          echo "=== Body ==="
-          echo "$BODY"
-          echo ""
-
-          curl -X POST "$SHEET_API_URL" \
-            -H "Content-Type: application/json" \
-            -d "$BODY"
+      # --------------------
+      # Notify Slack
+      # --------------------
       - name: Notify Slack With Actions
         id: notify_slack
         if: steps.check_source.outputs.run_scans == 'true'
-        env:
-          SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
-          FILE_NAME: ${{ steps.check_source.outputs.file_name }}
-          FORM_EDIT_URL: ${{ steps.pr_body.outputs.form_edit_url }}
-          UUID: ${{ steps.pr_body.outputs.uuid }}
-          BRANCH: ${{ github.head_ref || github.ref_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          EXISTING_THREAD_TS: ${{ steps.pr_body.outputs.thread_ts }}
-          EXISTING_CHANNEL_ID: ${{ steps.pr_body.outputs.channel_id }}
-        run: |
-          echo "FILE_NAME in notify step: [$FILE_NAME]"
+        uses: ./.github/actions/slack-notify-review
+        with:
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+          slack_user_id: ${{ steps.pr_body.outputs.slack_user_id }}
+          file_name: ${{ steps.check_source.outputs.file_name }}
+          form_edit_url: ${{ steps.pr_body.outputs.form_edit_url }}
+          uuid: ${{ steps.pr_body.outputs.uuid }}
+          branch: ${{ github.head_ref || github.ref_name }}
+          pr_number: ${{ github.event.pull_request.number }}
+          existing_thread_ts: ${{ steps.pr_body.outputs.thread_ts }}
+          existing_channel_id: ${{ steps.pr_body.outputs.channel_id }}
+          codeql: ${{ steps.scans.outputs.codeql }}
+          semgrep: ${{ steps.scans.outputs.semgrep }}
+          gemini: ${{ steps.scans.outputs.gemini }}
+          openai: ${{ steps.scans.outputs.openai }}
+          avg: ${{ steps.scans.outputs.avg }}
+          verdict: ${{ steps.scans.outputs.verdict }}
 
-          # 決定 THREAD_TS / CHANNEL_ID：PR body 有帶則沿用，否則發新訊息取得
-          if [ -n "$EXISTING_CHANNEL_ID" ] && [ -n "$EXISTING_THREAD_TS" ]; then
-            CHANNEL_ID="$EXISTING_CHANNEL_ID"
-            THREAD_TS="$EXISTING_THREAD_TS"
-            echo "Using existing message: channel=$CHANNEL_ID ts=$THREAD_TS"
-          else
-            RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
-              -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-              -H "Content-Type: application/json; charset=utf-8" \
-              -d '{"channel": "'"$SLACK_USER_ID"'", "text": "AI Review 結果載入中…"}')
-            echo "chat.postMessage response: $RESPONSE"
-            THREAD_TS=$(echo "$RESPONSE" | jq -r '.ts // empty')
-            CHANNEL_ID=$(echo "$RESPONSE" | jq -r '.channel // empty')
-            if [ -z "$THREAD_TS" ] || [ -z "$CHANNEL_ID" ]; then
-              echo "Error: failed to get ts or channel from postMessage"
-              exit 1
-            fi
-          fi
-
-          # 組 entry.2025086705 的值（JSON 後 URL-encode）
-          ENTRY_JSON=$(jq -n -c --arg u "$UUID" --arg t "$THREAD_TS" --arg c "$CHANNEL_ID" '{UUID:$u,THREAD_TS:$t,CHANNEL_ID:$c}')
-          ENTRY_VALUE=$(printf '%s' "$ENTRY_JSON" | jq -sRr @uri)
-          RESUBMIT_URL="${FORM_EDIT_URL}&entry.2025086705=${ENTRY_VALUE}"
-
-          # Phase 2: chat.update 更新為完整 blocks，按鈕 URL 帶入 THREAD_TS & CHANNEL_ID
-          if [[ "$VERDICT" == *"PASS"* ]]; then
-            UPDATE_PAYLOAD=$(jq -n -c \
-              --arg ch "$CHANNEL_ID" \
-              --arg ts "$THREAD_TS" \
-              --arg file_name "$FILE_NAME" \
-              --arg verdict "$VERDICT" \
-              --arg codeql "$CODEQL" \
-              --arg semgrep "$SEMGREP" \
-              --arg gemini "$GEMINI" \
-              --arg openai "$OPENAI" \
-              --arg avg "$AVG" \
-              --arg uuid "$UUID" \
-              --arg branch "$BRANCH" \
-              --arg pr_number "$PR_NUMBER" \
-              --arg slack_user_id "$SLACK_USER_ID" \
-              --arg resubmit_url "$RESUBMIT_URL" \
-              '{
-                channel: $ch,
-                ts: $ts,
-                attachments: [{
-                  color: "#2EB67D",
-                  blocks: [
-                    {type: "section", text: {type: "mrkdwn", text: (":white_check_mark: 你提交的檔案 => *" + $file_name + "* :star-struck: *已通過審核*")}},
-                    {type: "section", text: {type: "mrkdwn", text: ("*AI Review 結果如下*\n\n• 風險: *" + $verdict + "*\n• CodeQL: " + $codeql + "\n• SemGrep: " + $semgrep + "\n• Gemini Scan: " + $gemini + "\n• OpenAI Scan: " + $openai + "\n• Avg: *" + $avg + "*")}},
-                    {type: "section", text: {type: "mrkdwn", text: "_詳細請參考訊息內的附件_\n\n現在請你選擇操作："}},
-                    {type: "actions", elements: [
-                      {type: "button", text: {type: "plain_text", text: "確認上傳檔案"}, style: "primary", value: ({"action_id":"confirm_upload","uuid":$uuid,"branch":$branch,"pr_number":$pr_number,"slack_user_id":$slack_user_id} | @json), action_id: "confirm_upload"},
-                      {type: "button", text: {type: "plain_text", text: "重新提交檔案"}, url: $resubmit_url, value: "resubmit", action_id: "resubmit"},
-                      {type: "button", text: {type: "plain_text", text: "結束這次 review"}, style: "danger", value: ({"action_id":"cancel_review","uuid":$uuid,"branch":$branch,"pr_number":$pr_number,"slack_user_id":$slack_user_id} | @json), action_id: "cancel_review"}
-                    ]}
-                  ]
-                }]
-              }')
-          else
-            UPDATE_PAYLOAD=$(jq -n -c \
-              --arg ch "$CHANNEL_ID" \
-              --arg ts "$THREAD_TS" \
-              --arg file_name "$FILE_NAME" \
-              --arg verdict "$VERDICT" \
-              --arg codeql "$CODEQL" \
-              --arg semgrep "$SEMGREP" \
-              --arg gemini "$GEMINI" \
-              --arg openai "$OPENAI" \
-              --arg avg "$AVG" \
-              --arg uuid "$UUID" \
-              --arg branch "$BRANCH" \
-              --arg pr_number "$PR_NUMBER" \
-              --arg slack_user_id "$SLACK_USER_ID" \
-              --arg resubmit_url "$RESUBMIT_URL" \
-              '{
-                channel: $ch,
-                ts: $ts,
-                attachments: [{
-                  color: "#E01E5A",
-                  blocks: [
-                    {type: "section", text: {type: "mrkdwn", text: (":x: 你提交的檔案 => *" + $file_name + "* :melting_face: *未通過審核*")}},
-                    {type: "section", text: {type: "mrkdwn", text: ("*AI Review 結果如下*\n\n• 風險: *" + $verdict + "*\n• CodeQL: " + $codeql + "\n• SemGrep: " + $semgrep + "\n• Gemini Scan: " + $gemini + "\n• OpenAI Scan: " + $openai + "\n• Avg: *" + $avg + "*")}},
-                    {type: "section", text: {type: "mrkdwn", text: "_詳細請參考訊息內的附件_\n\n現在請你選擇操作："}},
-                    {type: "actions", elements: [
-                      {type: "button", text: {type: "plain_text", text: "重新提交檔案"}, url: $resubmit_url, value: "resubmit", action_id: "resubmit"},
-                      {type: "button", text: {type: "plain_text", text: "取消這次 review"}, style: "danger", value: ({"action_id":"cancel_review","uuid":$uuid,"branch":$branch,"pr_number":$pr_number,"slack_user_id":$slack_user_id} | @json), action_id: "cancel_review"}
-                    ]}
-                  ]
-                }]
-              }')
-          fi
-
-          curl -s -X POST https://slack.com/api/chat.update \
-            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            -d "$UPDATE_PAYLOAD"
-
-          echo "thread_ts=${THREAD_TS}" >> $GITHUB_OUTPUT
-          echo "channel_id=${CHANNEL_ID}" >> $GITHUB_OUTPUT
-
+      # --------------------
+      # Upload Reports To Slack
+      # --------------------
       - name: Upload Reports To Slack
         if: steps.check_source.outputs.run_scans == 'true'
-        env:
-          SLACK_USER_ID: ${{ steps.pr_body.outputs.slack_user_id }}
-          THREAD_TS: ${{ steps.notify_slack.outputs.thread_ts }}
-          CHANNEL_ID: ${{ steps.notify_slack.outputs.channel_id }}
-          REPORT_PATH: ${{ steps.build_report.outputs.report_path }}
-        run: |
-          FILE="$REPORT_PATH"
-          [ -z "$FILE" ] || [ ! -f "$FILE" ] && { echo "No report file to upload."; exit 0; }
-
-          echo "Uploading $FILE"
-          FILE_SIZE=$(wc -c < "$FILE")
-          FILE_NAME=$(basename "$FILE")
-
-          # 取得 upload URL
-          echo "=== get upload URL ==="
-          echo "FILE_NAME=$FILE_NAME FILE_SIZE=$FILE_SIZE"
-          RESPONSE=$(curl -s -S -X POST https://slack.com/api/files.getUploadURLExternal \
-            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            --data-urlencode "filename=$FILE_NAME" \
-            --data-urlencode "length=$FILE_SIZE")
-          echo "getUploadURLExternal response: $RESPONSE"
-
-          UPLOAD_URL=$(echo "$RESPONSE" | jq -r '.upload_url // empty')
-          FILE_ID=$(echo "$RESPONSE" | jq -r '.file_id // empty')
-
-          if [ -z "$UPLOAD_URL" ] || [ -z "$FILE_ID" ]; then
-            echo "Error: getUploadURLExternal failed: $RESPONSE"
-            exit 1
-          fi
-
-          # 上傳 binary
-          echo "=== upload binary ==="
-          echo "UPLOAD_URL=$UPLOAD_URL FILE=$FILE"
-          RESPONSE_PUT=$(curl -s -f -X POST "$UPLOAD_URL" \
-            -H "Content-Type: application/octet-stream" \
-            --data-binary @"$FILE")
-          echo "POST response: $RESPONSE_PUT"
-
-          # 完成上傳並指定 thread
-          echo "=== to thread ==="
-          echo "FILE_ID=$FILE_ID FILE_NAME=$FILE_NAME CHANNEL_ID=$CHANNEL_ID THREAD_TS=$THREAD_TS"
-          RESPONSE_COMPLETE=$(curl -s -S -X POST https://slack.com/api/files.completeUploadExternal \
-            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
-            -H "Content-Type: application/x-www-form-urlencoded" \
-            --data-urlencode "files=[{\"id\":\"$FILE_ID\",\"title\":\"$FILE_NAME\"}]" \
-            --data-urlencode "channel_id=$CHANNEL_ID" \
-            --data-urlencode "thread_ts=$THREAD_TS")
-          echo "completeUploadExternal response: $RESPONSE_COMPLETE"
+        uses: ./.github/actions/slack-upload-file
+        with:
+          slack_bot_token: ${{ secrets.SLACK_BOT_TOKEN }}
+          file_path: ${{ steps.scans.outputs.report_path }}
+          channel_id: ${{ steps.notify_slack.outputs.channel_id }}
+          thread_ts: ${{ steps.notify_slack.outputs.thread_ts }}

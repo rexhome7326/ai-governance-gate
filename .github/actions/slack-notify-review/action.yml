@@ -1,0 +1,181 @@
+name: Slack Notify Review
+description: Send or update Slack message with AI review results and action buttons
+
+inputs:
+  slack_bot_token:
+    description: 'Slack Bot OAuth token'
+    required: true
+  slack_user_id:
+    description: 'Slack user ID to send the message to'
+    required: true
+  file_name:
+    description: 'Name of the scanned file'
+    required: true
+  form_edit_url:
+    description: 'Google Form edit URL for resubmission'
+    required: true
+  uuid:
+    description: 'Unique identifier for the review'
+    required: true
+  branch:
+    description: 'Git branch name'
+    required: true
+  pr_number:
+    description: 'Pull request number'
+    required: true
+  existing_thread_ts:
+    description: 'Existing Slack thread timestamp (empty to create new message)'
+    required: false
+    default: ''
+  existing_channel_id:
+    description: 'Existing Slack channel ID (empty to create new message)'
+    required: false
+    default: ''
+  codeql:
+    description: 'CodeQL scan score'
+    required: true
+  semgrep:
+    description: 'Semgrep scan score'
+    required: true
+  gemini:
+    description: 'Gemini AI scan score'
+    required: true
+  openai:
+    description: 'OpenAI scan score'
+    required: true
+  avg:
+    description: 'Weighted average score'
+    required: true
+  verdict:
+    description: 'Final verdict string'
+    required: true
+
+outputs:
+  thread_ts:
+    description: 'Slack message thread timestamp'
+    value: ${{ steps.notify.outputs.thread_ts }}
+  channel_id:
+    description: 'Slack channel ID where the message was sent'
+    value: ${{ steps.notify.outputs.channel_id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Notify Slack With Actions
+      id: notify
+      shell: bash
+      env:
+        SLACK_BOT_TOKEN: ${{ inputs.slack_bot_token }}
+        SLACK_USER_ID: ${{ inputs.slack_user_id }}
+        FILE_NAME: ${{ inputs.file_name }}
+        FORM_EDIT_URL: ${{ inputs.form_edit_url }}
+        UUID: ${{ inputs.uuid }}
+        BRANCH: ${{ inputs.branch }}
+        PR_NUMBER: ${{ inputs.pr_number }}
+        EXISTING_THREAD_TS: ${{ inputs.existing_thread_ts }}
+        EXISTING_CHANNEL_ID: ${{ inputs.existing_channel_id }}
+        CODEQL: ${{ inputs.codeql }}
+        SEMGREP: ${{ inputs.semgrep }}
+        GEMINI: ${{ inputs.gemini }}
+        OPENAI: ${{ inputs.openai }}
+        AVG: ${{ inputs.avg }}
+        VERDICT: ${{ inputs.verdict }}
+      run: |
+        echo "FILE_NAME in notify step: [$FILE_NAME]"
+
+        if [ -n "$EXISTING_CHANNEL_ID" ] && [ -n "$EXISTING_THREAD_TS" ]; then
+          CHANNEL_ID="$EXISTING_CHANNEL_ID"
+          THREAD_TS="$EXISTING_THREAD_TS"
+          echo "Using existing message: channel=$CHANNEL_ID ts=$THREAD_TS"
+        else
+          RESPONSE=$(curl -s -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d '{"channel": "'"$SLACK_USER_ID"'", "text": "AI Review 結果載入中…"}')
+          echo "chat.postMessage response: $RESPONSE"
+          THREAD_TS=$(echo "$RESPONSE" | jq -r '.ts // empty')
+          CHANNEL_ID=$(echo "$RESPONSE" | jq -r '.channel // empty')
+          if [ -z "$THREAD_TS" ] || [ -z "$CHANNEL_ID" ]; then
+            echo "Error: failed to get ts or channel from postMessage"
+            exit 1
+          fi
+        fi
+
+        ENTRY_JSON=$(jq -n -c --arg u "$UUID" --arg t "$THREAD_TS" --arg c "$CHANNEL_ID" '{UUID:$u,THREAD_TS:$t,CHANNEL_ID:$c}')
+        ENTRY_VALUE=$(printf '%s' "$ENTRY_JSON" | jq -sRr @uri)
+        RESUBMIT_URL="${FORM_EDIT_URL}&entry.2025086705=${ENTRY_VALUE}"
+
+        if [[ "$VERDICT" == *"PASS"* ]]; then
+          UPDATE_PAYLOAD=$(jq -n -c \
+            --arg ch "$CHANNEL_ID" \
+            --arg ts "$THREAD_TS" \
+            --arg file_name "$FILE_NAME" \
+            --arg verdict "$VERDICT" \
+            --arg codeql "$CODEQL" \
+            --arg semgrep "$SEMGREP" \
+            --arg gemini "$GEMINI" \
+            --arg openai "$OPENAI" \
+            --arg avg "$AVG" \
+            --arg uuid "$UUID" \
+            --arg branch "$BRANCH" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg slack_user_id "$SLACK_USER_ID" \
+            --arg resubmit_url "$RESUBMIT_URL" \
+            '{
+              channel: $ch,
+              ts: $ts,
+              attachments: [{
+                color: "#2EB67D",
+                blocks: [
+                  {type: "section", text: {type: "mrkdwn", text: (":white_check_mark: 你提交的檔案 => *" + $file_name + "* :star-struck: *已通過審核*")}},
+                  {type: "section", text: {type: "mrkdwn", text: ("*AI Review 結果如下*\n\n• 風險: *" + $verdict + "*\n• CodeQL: " + $codeql + "\n• SemGrep: " + $semgrep + "\n• Gemini Scan: " + $gemini + "\n• OpenAI Scan: " + $openai + "\n• Avg: *" + $avg + "*")}},
+                  {type: "section", text: {type: "mrkdwn", text: "_詳細請參考訊息內的附件_\n\n現在請你選擇操作："}},
+                  {type: "actions", elements: [
+                    {type: "button", text: {type: "plain_text", text: "確認上傳檔案"}, style: "primary", value: ({"action_id":"confirm_upload","uuid":$uuid,"branch":$branch,"pr_number":$pr_number,"slack_user_id":$slack_user_id} | @json), action_id: "confirm_upload"},
+                    {type: "button", text: {type: "plain_text", text: "重新提交檔案"}, url: $resubmit_url, value: "resubmit", action_id: "resubmit"},
+                    {type: "button", text: {type: "plain_text", text: "結束這次 review"}, style: "danger", value: ({"action_id":"cancel_review","uuid":$uuid,"branch":$branch,"pr_number":$pr_number,"slack_user_id":$slack_user_id} | @json), action_id: "cancel_review"}
+                  ]}
+                ]
+              }]
+            }')
+        else
+          UPDATE_PAYLOAD=$(jq -n -c \
+            --arg ch "$CHANNEL_ID" \
+            --arg ts "$THREAD_TS" \
+            --arg file_name "$FILE_NAME" \
+            --arg verdict "$VERDICT" \
+            --arg codeql "$CODEQL" \
+            --arg semgrep "$SEMGREP" \
+            --arg gemini "$GEMINI" \
+            --arg openai "$OPENAI" \
+            --arg avg "$AVG" \
+            --arg uuid "$UUID" \
+            --arg branch "$BRANCH" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg slack_user_id "$SLACK_USER_ID" \
+            --arg resubmit_url "$RESUBMIT_URL" \
+            '{
+              channel: $ch,
+              ts: $ts,
+              attachments: [{
+                color: "#E01E5A",
+                blocks: [
+                  {type: "section", text: {type: "mrkdwn", text: (":x: 你提交的檔案 => *" + $file_name + "* :melting_face: *未通過審核*")}},
+                  {type: "section", text: {type: "mrkdwn", text: ("*AI Review 結果如下*\n\n• 風險: *" + $verdict + "*\n• CodeQL: " + $codeql + "\n• SemGrep: " + $semgrep + "\n• Gemini Scan: " + $gemini + "\n• OpenAI Scan: " + $openai + "\n• Avg: *" + $avg + "*")}},
+                  {type: "section", text: {type: "mrkdwn", text: "_詳細請參考訊息內的附件_\n\n現在請你選擇操作："}},
+                  {type: "actions", elements: [
+                    {type: "button", text: {type: "plain_text", text: "重新提交檔案"}, url: $resubmit_url, value: "resubmit", action_id: "resubmit"},
+                    {type: "button", text: {type: "plain_text", text: "取消這次 review"}, style: "danger", value: ({"action_id":"cancel_review","uuid":$uuid,"branch":$branch,"pr_number":$pr_number,"slack_user_id":$slack_user_id} | @json), action_id: "cancel_review"}
+                  ]}
+                ]
+              }]
+            }')
+        fi
+
+        curl -s -X POST https://slack.com/api/chat.update \
+          -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+          -H "Content-Type: application/json; charset=utf-8" \
+          -d "$UPDATE_PAYLOAD"
+
+        echo "thread_ts=${THREAD_TS}" >> $GITHUB_OUTPUT
+        echo "channel_id=${CHANNEL_ID}" >> $GITHUB_OUTPUT

@@ -1,0 +1,38 @@
+name: Update Sheet
+description: Update a record in Google Sheet via API (auto-inserts current timestamp into field "2")
+
+inputs:
+  uuid:
+    description: 'Unique identifier for the record to update'
+    required: true
+  patch_json:
+    description: 'JSON object for the patch field, e.g. {"7":"USER_CLOSED"}'
+    required: true
+  sheet_api_url:
+    description: 'Google Sheet API endpoint URL'
+    required: true
+  sheet_api_token:
+    description: 'Authentication token for the Sheet API'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Update Sheet
+      shell: bash
+      run: |
+        CURRENT_TIME=$(node -e "console.log(new Date().toISOString())")
+        PATCH_WITH_TIME=$(echo '${{ inputs.patch_json }}' | jq -c --arg ts "$CURRENT_TIME" '. + {"2": $ts}')
+        BODY=$(jq -n -c \
+          --arg token "${{ inputs.sheet_api_token }}" \
+          --arg uuid "${{ inputs.uuid }}" \
+          --argjson patch "$PATCH_WITH_TIME" \
+          '{token: $token, action: "update", uuid: $uuid, patch: $patch}')
+
+        echo "=== Update Sheet ==="
+        echo "UUID: ${{ inputs.uuid }}"
+        echo "Patch: $PATCH_WITH_TIME"
+
+        curl -s -X POST "${{ inputs.sheet_api_url }}" \
+          -H "Content-Type: application/json" \
+          -d "$BODY"
