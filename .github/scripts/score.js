@@ -15,9 +15,9 @@ const openai = openaiResult.score;
 const avg = ((codeql * 1 + semgrep * 1 + gemini * 4 + openai * 4) / 10).toFixed(1);
 
 let verdict = 'S3 PASS';
-if (avg >= 7) verdict = 'S0 FAIL';
-else if (avg >= 4) verdict = 'S1 FAIL';
-else if (avg >= 1) verdict = 'S2 WARNING';
+if (avg >= 8) verdict = 'S0 FAIL';
+else if (avg >= 5) verdict = 'S1 FAIL';
+else if (avg >= 2) verdict = 'S2 WARNING';
 
 const result = {
   codeql,
