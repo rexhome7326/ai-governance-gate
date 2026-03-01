@@ -88,5 +88,5 @@ jobs:
           response_url: ${{ github.event.inputs.response_url }}
           attachment_color: ${{ github.event.inputs.attachment_color }}
           is_success: ${{ steps.close_pr.outputs.success }}
-          success_text: ':white_check_mark: 已上傳檔案\n<${{ steps.upload.outputs.url }}|開啟連結>'
+          success_text: ':white_check_mark: 已上傳檔案（<${{ steps.upload.outputs.url }}|開啟連結>）'
           fail_text: ':x: 上傳失敗，請再重新按一次'
