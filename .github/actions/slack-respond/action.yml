@@ -32,14 +32,14 @@ runs:
       run: |
         if [ "${{ inputs.is_success }}" = "true" ]; then
           BLOCKS=$(jq -c --arg text "${{ inputs.success_text }}" \
-            '(.[0:3] + [{type: "section", text: {type: "mrkdwn", text: $text}}])' \
+            '(.[0:3] + [{type: "section", text: {type: "mrkdwn", text: ($text | gsub("\\\\n"; "\n"))}}])' \
             "${{ inputs.original_blocks_path }}")
           BODY=$(jq -n -c --arg color "${{ inputs.attachment_color }}" --argjson blocks "$BLOCKS" \
             '{replace_original: true, attachments: [{color: $color, blocks: $blocks}]}')
           curl -s -X POST "${{ inputs.response_url }}" -H "Content-Type: application/json" -d "$BODY"
         else
           BLOCKS=$(jq -c --arg text "${{ inputs.fail_text }}" \
-            '(.[0:3] + [{type: "section", text: {type: "mrkdwn", text: $text}}])' \
+            '(.[0:3] + [{type: "section", text: {type: "mrkdwn", text: ($text | gsub("\\\\n"; "\n"))}}])' \
             "${{ inputs.original_blocks_path }}")
           BODY=$(jq -n -c --arg color "${{ inputs.attachment_color }}" --argjson blocks "$BLOCKS" \
             '{replace_original: true, attachments: [{color: $color, blocks: $blocks}]}')
