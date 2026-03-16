@@ -67,7 +67,7 @@ jobs:
         uses: ./.github/actions/update-sheet
         with:
           uuid: ${{ steps.inputs.outputs.uuid }}
-          patch_json: '{"7":"USER_UPLOADED","16":"${{ steps.upload.outputs.url }}"}'
+          patch_json: '{"9":"USER_UPLOADED","18":"${{ steps.upload.outputs.url }}"}'
           sheet_api_url: ${{ secrets.SHEET_API_URL }}
           sheet_api_token: ${{ secrets.SHEET_API_TOKEN }}
 

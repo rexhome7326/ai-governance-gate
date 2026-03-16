@@ -49,6 +49,11 @@ jobs:
           CHANNEL_ID=$(echo "$PR_BODY" | jq -r '.channelId // .channel_id // empty' 2>/dev/null || true)
           echo "channel_id=${CHANNEL_ID:-}" >> $GITHUB_OUTPUT
 
+          DESCRIPTION=$(echo "$PR_BODY" | jq -r '.description // empty' 2>/dev/null || true)
+          echo "description=${DESCRIPTION:-}" >> $GITHUB_OUTPUT
+          APIS=$(echo "$PR_BODY" | jq -r '.apis // empty' 2>/dev/null || true)
+          echo "apis=${APIS:-}" >> $GITHUB_OUTPUT
+
       - name: Find And Unzip
         run: |
           mkdir -p ${{ env.SCAN_DIR }} reports
@@ -94,6 +99,8 @@ jobs:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           file_name: ${{ steps.check_source.outputs.file_name }}
+          description: ${{ steps.pr_body.outputs.description }}
+          apis: ${{ steps.pr_body.outputs.apis }}
 
       # --------------------
       # Upload Report Artifact
@@ -114,7 +121,7 @@ jobs:
         uses: ./.github/actions/update-sheet
         with:
           uuid: ${{ steps.pr_body.outputs.uuid }}
-          patch_json: '{"7":"SCANNED","9":"${{ steps.upload-report.outputs.artifact-url }}","10":"${{ steps.scans.outputs.codeql }}","11":"${{ steps.scans.outputs.semgrep }}","12":"${{ steps.scans.outputs.gemini }}","13":"${{ steps.scans.outputs.openai }}","14":"${{ steps.scans.outputs.avg }}","15":"${{ steps.scans.outputs.verdict }}"}'
+          patch_json: '{"9":"SCANNED","11":"${{ steps.upload-report.outputs.artifact-url }}","12":"${{ steps.scans.outputs.codeql }}","13":"${{ steps.scans.outputs.semgrep }}","14":"${{ steps.scans.outputs.gemini }}","15":"${{ steps.scans.outputs.openai }}","16":"${{ steps.scans.outputs.avg }}","17":"${{ steps.scans.outputs.verdict }}"}'
           sheet_api_url: ${{ secrets.SHEET_API_URL }}
           sheet_api_token: ${{ secrets.SHEET_API_TOKEN }}
 

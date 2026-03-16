@@ -14,6 +14,12 @@ inputs:
   file_name:
     description: 'Original uploaded file name (for report naming)'
     required: true
+  description:
+    description: 'Project description from PR body'
+    required: false
+  apis:
+    description: 'APIs list from PR body'
+    required: false
 
 outputs:
   codeql:
@@ -84,6 +90,12 @@ runs:
       env:
         OPENAI_API_KEY: ${{ inputs.openai_api_key }}
       run: node .github/scripts/openai_scan.js
+
+    - name: Scan APIs
+      shell: bash
+      run: |
+        echo "Description: ${{ inputs.description }}"
+        echo "APIs: ${{ inputs.apis }}"
 
     - name: Score Results
       shell: bash
